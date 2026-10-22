@@ -51,6 +51,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
@@ -490,12 +492,21 @@ private fun DetailScreen(
         }
         previewPath?.let { path ->
             if (images.any { it.path == path }) {
-                com.neoruaa.xhsdn.ui.StoredImageViewer(
-                    modifier = Modifier.fillMaxSize(),
-                    images = images,
-                    initialPath = path,
-                    onDismiss = { previewPath = null }
-                )
+                Dialog(
+                    onDismissRequest = { previewPath = null },
+                    properties = DialogProperties(
+                        dismissOnClickOutside = false,
+                        usePlatformDefaultWidth = false,
+                        decorFitsSystemWindows = false
+                    )
+                ) {
+                    com.neoruaa.xhsdn.ui.StoredImageViewer(
+                        modifier = Modifier.fillMaxSize(),
+                        images = images,
+                        initialPath = path,
+                        onDismiss = { previewPath = null }
+                    )
+                }
             }
         }
     }
