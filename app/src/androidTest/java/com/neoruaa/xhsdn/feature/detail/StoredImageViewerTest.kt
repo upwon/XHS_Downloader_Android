@@ -41,10 +41,10 @@ class StoredImageViewerTest {
         try {
             clickDescription(files[1].absolutePath)
             awaitText(app.getString(R.string.detail_image_position, 2, 3))
-            awaitDescription(files[1].absolutePath)
+            awaitDescription(files[1].name)
             swipe(forward = true)
             awaitText(app.getString(R.string.detail_image_position, 3, 3))
-            awaitDescription(files[2].absolutePath)
+            awaitDescription(files[2].name)
             swipe(forward = false)
             awaitText(app.getString(R.string.detail_image_position, 2, 3))
         } finally {
