@@ -1,0 +1,79 @@
+name: Publish verified signed Red Potato Downloader APK
+on:
+  push:
+    branches: ['release/publish-v1.4.3']
+    paths: ['.github/workflows/publish-signed.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download signed artifact from isolated AniCh workflow
+        uses: actions/download-artifact@v4
+        with:
+          repository: upwon/AniCh
+          run-id: 39811951862
+          artifact-ids: '12441140605'
+          github-token: ${{ github.token }}
+          path: dist
+      - name: Verify source, APK checksum and signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find dist -name xhs-upwon-1.4.3-release.apk -type f)
+          test -n "$APK" && test "$(printf '%s\\n' "$APK" | wc -l)" -eq 1
+          DIRECTORY=$(dirname "$APK")
+          echo "ASSET_DIR=$DIRECTORY" >> "$GITHUB_ENV"
+          test "$(cat "$DIRECTORY/SOURCE_COMMIT.txt")" = 'fce33b82869882c24cb1b0bc20ab275acecdab6f'
+          test "$(sha256sum "$APK" | cut -d ' ' -f1)" = 'fbff2f5f6a92184e5e0b13a950894ee4e112303d829ecb98e00b729cfb1a6abf'
+          (cd "$DIRECTORY" && sha256sum --check SHA256SUMS.txt)
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" > /tmp/xhs-certificate.txt
+          ACTUAL=$(awk '/certificate SHA-256 digest:/ {print $NF; exit}' /tmp/xhs-certificate.txt | tr 'A-F' 'a-f' | tr -d ':')
+          test "$ACTUAL" = 'd6660edec3cfd4d5ab2c35c5bcbfeb406a4e0cc332a00bf34c01fc61707de44d'
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.4.3 >/dev/null 2>&1; then
+            echo '::error::Release v1.4.3 already exists; refusing to overwrite it.'
+            exit 1
+          fi
+          APK_SHA=$(sha256sum "$ASSET_DIR/xhs-upwon-1.4.3-release.apk" | cut -d ' ' -f1)
+          cat > /tmp/xhs-release-notes.md <<NOTES
+          ## 红薯下载器 1.4.3
+
+          - 应用名称改为“红薯下载器”，并加入原创 3D 红薯下载吉祥物图标。
+          - 修复下载详情页点击图片后预览闪退；支持全屏查看及左右切换。
+          - 模拟器点击打开、预览保持显示、双向翻页测试通过。
+          - 包名保持 `com.upwon.xhsdn`，与上一版相同签名证书，可直接升级。
+
+          **下载 `xhs-upwon-1.4.3-release.apk` 安装。**
+          如果当前安装的是此前的 debug 测试 APK，需要先卸载；正式版使用 AniCh 现有 release 证书签名。
+
+          源代码：`fce33b82869882c24cb1b0bc20ab275acecdab6f`
+          签名构建：https://github.com/upwon/AniCh/actions/runs/39811951862
+          APK SHA-256：`$APK_SHA`
+          NOTES
+          gh release create v1.4.3 \
+            "$ASSET_DIR/xhs-upwon-1.4.3-release.apk" \
+            "$ASSET_DIR/SHA256SUMS.txt" \
+            "$ASSET_DIR/signing-certificate.txt" \
+            "$ASSET_DIR/SOURCE_COMMIT.txt" \
+            --target fce33b82869882c24cb1b0bc20ab275acecdab6f \
+            --title '红薯下载器 1.4.3' \
+            --notes-file /tmp/xhs-release-notes.md \
+            --prerelease
