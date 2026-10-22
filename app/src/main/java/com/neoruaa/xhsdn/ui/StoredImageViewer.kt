@@ -5,17 +5,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.neoruaa.xhsdn.R
 import com.neoruaa.xhsdn.utils.decodeSampledBitmap
 import com.neoruaa.xhsdn.viewmodels.MediaItem
@@ -38,12 +38,13 @@ fun StoredImageViewer(
         initialPage = images.indexOfFirst { it.path == initialPath }.coerceAtLeast(0),
         pageCount = { images.size }
     )
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface).safeDrawingPadding()) {
+    BackHandler(onBack = onDismiss)
+    Column(modifier.fillMaxSize().background(Color.Black)) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(text = stringResource(R.string.back_content_description), onClick = onDismiss)
                 Spacer(Modifier.weight(1f))
-                Text(stringResource(R.string.detail_image_position, pager.currentPage + 1, images.size))
+                Text(stringResource(R.string.detail_image_position, pager.currentPage + 1, images.size), color = Color.White)
             }
             HorizontalPager(
                 state = pager,

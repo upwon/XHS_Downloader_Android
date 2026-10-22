@@ -6,6 +6,19 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -47,8 +60,25 @@ class StoredImageViewerTest {
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         try {
             scenario.onActivity { activity -> activity.setContent { MiuixTheme {
-                StoredImageViewer(images = images, initialPath = images[1].path, onDismiss = {})
+                var previewOpen by remember { mutableStateOf(false) }
+                Box(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier.size(96.dp)
+                            .align(Alignment.Center)
+                            .clickable { previewOpen = true }
+                            .semantics { contentDescription = "open preview" }
+                    )
+                    if (previewOpen) {
+                        StoredImageViewer(
+                            modifier = Modifier.fillMaxSize(),
+                            images = images,
+                            initialPath = images[1].path,
+                            onDismiss = { previewOpen = false }
+                        )
+                    }
+                }
             } } }
+            tapCenter()
             awaitText(app.getString(R.string.detail_image_position, 2, 3))
             awaitDescription("image-1.png")
             swipe(forward = true)
@@ -74,6 +104,25 @@ class StoredImageViewerTest {
                 start + (end - start) * step / 20, y, 0)
             event.source = InputDevice.SOURCE_TOUCHSCREEN
             try { automation.injectInputEvent(event, true) } finally { event.recycle() }
+        }
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun tapCenter() {
+        val metrics = app.resources.displayMetrics
+        val x = metrics.widthPixels / 2f
+        val y = metrics.heightPixels / 2f
+        val down = SystemClock.uptimeMillis()
+        val downEvent = MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0)
+        val upEvent = MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0)
+        downEvent.source = InputDevice.SOURCE_TOUCHSCREEN
+        upEvent.source = InputDevice.SOURCE_TOUCHSCREEN
+        try {
+            automation.injectInputEvent(downEvent, true)
+            automation.injectInputEvent(upEvent, true)
+        } finally {
+            downEvent.recycle()
+            upEvent.recycle()
         }
         instrumentation.waitForIdleSync()
     }

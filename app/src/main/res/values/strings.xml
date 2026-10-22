@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">XHS Downloader</string>
+    <string name="app_name">红薯下载器</string>
     <string name="enter_xhs_url">Enter XHS post share URL</string>
     <string name="download_button">Download Media</string>
     <string name="ready_to_download">Press the button below to download</string>

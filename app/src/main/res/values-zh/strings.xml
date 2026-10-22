@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">小红书下载器</string>
+    <string name="app_name">红薯下载器</string>
     <string name="enter_xhs_url">输入小红书帖子分享链接</string>
     <string name="download_button">下载媒体</string>
     <string name="ready_to_download">点击底部按钮开始下载</string>

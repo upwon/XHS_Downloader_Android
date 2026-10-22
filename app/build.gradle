@@ -16,8 +16,8 @@ android {
         applicationId "com.upwon.xhsdn"
         minSdk 24
         targetSdk 37
-        versionCode 26
-        versionName "1.4.2"
+        versionCode 27
+        versionName "1.4.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -28,25 +28,18 @@ android {
         signingPropertiesFile.withInputStream { signingProperties.load(it) }
     }
 
-    // Accept both this project's properties and the existing YTDLnis property names.
-    def signingValue = { name ->
-        signingProperties.getProperty(name, signingProperties.getProperty("signingConfig.${name}"))
-    }
-
     signingConfigs {
         release {
-            storeFile rootProject.file(signingValue("storeFile") ?: "release-keystore.jks")
-            storePassword signingValue("storePassword")
-            keyAlias signingValue("keyAlias") ?: "xhsdownloader-release"
-            keyPassword signingValue("keyPassword")
+            storeFile rootProject.file(signingProperties.getProperty("storeFile", "release-keystore.jks"))
+            storePassword signingProperties.getProperty("storePassword")
+            keyAlias signingProperties.getProperty("keyAlias", "xhsdownloader-release")
+            keyPassword signingProperties.getProperty("keyPassword")
         }
     }
 
     buildTypes {
         release {
-            if (signingPropertiesFile.exists()) {
-                signingConfig signingConfigs.release
-            }
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

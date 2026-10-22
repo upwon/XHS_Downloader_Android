@@ -401,15 +401,6 @@ private fun DetailScreen(
         (uiState.downloadCards.mapNotNull { it.stored } + uiState.mediaItems)
             .filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
     }
-    previewPath?.let { path ->
-        if (images.any { it.path == path }) {
-            com.neoruaa.xhsdn.ui.StoredImageViewer(
-                images = images,
-                initialPath = path,
-                onDismiss = { previewPath = null }
-            )
-        }
-    }
     val scrollBehavior = MiuixScrollBehavior(state = topBarState)
     val windowLayoutInfo = rememberWindowLayoutInfo()
     val topBarBackdrop = rememberMiuixTopBarBackdrop()
@@ -417,9 +408,10 @@ private fun DetailScreen(
     // Actions menu state
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout),
-        topBar = {
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout),
+            topBar = {
             AdaptiveTopAppBar(
                 title = uiState.taskTitle,
                 isWideScreen = windowLayoutInfo.isWideScreen,
@@ -478,23 +470,34 @@ private fun DetailScreen(
                 },
                 scrollBehavior = scrollBehavior
             )
+            }
+        ) { padding ->
+            FilesPage(
+                uiState = uiState,
+                onMediaClick = { item ->
+                    if (item.type == MediaType.IMAGE) previewPath = item.path else onMediaClick(item)
+                },
+                onDeleteMedia = onDeleteMedia,
+                topPadding = padding.calculateTopPadding(),
+                contentStartPadding = windowLayoutInfo.contentStartPadding,
+                contentEndPadding = windowLayoutInfo.contentEndPadding,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .miuixBackdropSource(topBarBackdrop)
+                    .miuixVerticalScrollEffects()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+            )
         }
-    ) { padding ->
-        FilesPage(
-            uiState = uiState,
-            onMediaClick = { item ->
-                if (item.type == MediaType.IMAGE) previewPath = item.path else onMediaClick(item)
-            },
-            onDeleteMedia = onDeleteMedia,
-            topPadding = padding.calculateTopPadding(),
-            contentStartPadding = windowLayoutInfo.contentStartPadding,
-            contentEndPadding = windowLayoutInfo.contentEndPadding,
-            modifier = Modifier
-                .fillMaxSize()
-                .miuixBackdropSource(topBarBackdrop)
-                .miuixVerticalScrollEffects()
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
-        )
+        previewPath?.let { path ->
+            if (images.any { it.path == path }) {
+                com.neoruaa.xhsdn.ui.StoredImageViewer(
+                    modifier = Modifier.fillMaxSize(),
+                    images = images,
+                    initialPath = path,
+                    onDismiss = { previewPath = null }
+                )
+            }
+        }
     }
 }
 
