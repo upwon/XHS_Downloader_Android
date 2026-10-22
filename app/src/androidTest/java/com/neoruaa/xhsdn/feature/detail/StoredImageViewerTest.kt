@@ -39,7 +39,7 @@ class StoredImageViewerTest {
             DetailActivity.newIntent(app, "", "Viewer test", files.map(File::getAbsolutePath))
         )
         try {
-            clickDescription(files[1].absolutePath)
+            clickDescription(files[1].name)
             awaitText(app.getString(R.string.detail_image_position, 2, 3))
             awaitDescription(files[1].name)
             swipe(forward = true)
