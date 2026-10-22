@@ -28,6 +28,15 @@ jobs:
           profile: pixel_2
           disable-animations: true
           script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
+      - name: Preserve image preview test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-preview-test-results-${{ github.run_id }}
+          path: |
+            app/build/reports/androidTests/connected/debug
+            app/build/outputs/androidTest-results/connected/debug
+          if-no-files-found: ignore
       - name: Configure signing
         id: signing
         env:
