@@ -1,0 +1,80 @@
+name: Publish verified signed APK
+on:
+  push:
+    branches: ['release/publish-v1.4.2']
+    paths: ['.github/workflows/publish-signed.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download the verified signed artifact
+        uses: actions/download-artifact@v4
+        with:
+          repository: upwon/AniCh
+          run-id: 39806672197
+          artifact-ids: '12438083002'
+          github-token: ${{ github.token }}
+          path: dist
+      - name: Verify source, APK checksum and certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find dist -name xhs-upwon-1.4.2-release.apk -type f)
+          test -n "$APK" && test "$(printf '%s\n' "$APK" | wc -l)" -eq 1
+          DIRECTORY=$(dirname "$APK")
+          echo "ASSET_DIR=$DIRECTORY" >> "$GITHUB_ENV"
+          test "$(cat "$DIRECTORY/SOURCE_COMMIT.txt")" = 'c2261e9b5e944e648a027ce0ae30c0d7ce11b9ae'
+          test "$(sha256sum "$APK" | cut -d ' ' -f1)" = '41459a8744f3502f9053b27540ea3fd1d7bbfa9bd539bf935893c75e4abc4d73'
+          (cd "$DIRECTORY" && sha256sum --check SHA256SUMS.txt)
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" > /tmp/xhs-certificate.txt
+          ACTUAL=$(awk '/certificate SHA-256 digest:/ {print $NF; exit}' /tmp/xhs-certificate.txt | tr 'A-F' 'a-f' | tr -d ':')
+          test "$ACTUAL" = 'd6660edec3cfd4d5ab2c35c5bcbfeb406a4e0cc332a00bf34c01fc61707de44d'
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.4.2 >/dev/null 2>&1; then
+            echo '::error::Release v1.4.2 already exists; refusing to overwrite it.'
+            exit 1
+          fi
+          cat > /tmp/xhs-release-notes.md <<'NOTES'
+          ## XHS Downloader 1.4.2
+
+          - 同步上游 1.4.1 的后续改动。
+          - 下载详情支持应用内图片查看、左右滑动及页码，兼容文件路径和 content URI。
+          - 包名改为 `com.upwon.xhsdn`，可与原版共存。
+          - 使用 upwon/AniCh 的固定证书签名，APK v2/v3 签名验证通过。
+
+          **下载 `xhs-upwon-1.4.2-release.apk` 安装即可。**
+          如果安装过此前的 debug 测试包，需要先卸载测试包；两者证书不同，不能覆盖安装。
+
+          本版已通过编译、单元测试及 lint。图片预览和翻页尚未完成真机验收，因此先标记为预发布。
+
+          源代码：`c2261e9b5e944e648a027ce0ae30c0d7ce11b9ae`
+          签名构建：https://github.com/upwon/AniCh/actions/runs/39806672197
+          APK SHA-256：`41459a8744f3502f9053b27540ea3fd1d7bbfa9bd539bf935893c75e4abc4d73`
+          NOTES
+          gh release create v1.4.2 \
+            "$ASSET_DIR/xhs-upwon-1.4.2-release.apk" \
+            "$ASSET_DIR/SHA256SUMS.txt" \
+            "$ASSET_DIR/signing-certificate.txt" \
+            "$ASSET_DIR/SOURCE_COMMIT.txt" \
+            --target c2261e9b5e944e648a027ce0ae30c0d7ce11b9ae \
+            --title 'XHS Downloader 1.4.2' \
+            --notes-file /tmp/xhs-release-notes.md \
+            --prerelease
