@@ -16,8 +16,8 @@ android {
         applicationId "com.upwon.xhsdn"
         minSdk 24
         targetSdk 37
-        versionCode 27
-        versionName "1.4.3"
+        versionCode 28
+        versionName "1.4.4"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -28,10 +28,10 @@ android {
         signingPropertiesFile.withInputStream { signingProperties.load(it) }
     }
 
-    // Accept both this project's properties and the existing YTDLnis property names.
     def signingValue = { name ->
         signingProperties.getProperty(name, signingProperties.getProperty("signingConfig.${name}"))
     }
+
     def hasReleaseSigning = ["storeFile", "storePassword", "keyAlias", "keyPassword"].every { name ->
         def value = signingValue(name)
         value != null && !value.trim().isEmpty()
