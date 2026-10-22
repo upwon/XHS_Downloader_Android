@@ -20,8 +20,6 @@ jobs:
         with:
           packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
-      - name: Install SDK
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
       - name: Configure signing
         id: signing
         env:
