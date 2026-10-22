@@ -42,7 +42,7 @@ jobs:
       - name: Validate and build
         env:
           BUILD_TASK: ${{ steps.signing.outputs.task }}
-        run: bash ./gradlew :app:testDebugUnitTest :app:lintDebug ":app:$BUILD_TASK" --no-daemon
+        run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebugAndroidTest :app:lintDebug ":app:$BUILD_TASK" --no-daemon
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
