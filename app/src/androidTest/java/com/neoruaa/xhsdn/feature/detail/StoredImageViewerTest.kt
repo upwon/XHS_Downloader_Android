@@ -33,7 +33,7 @@ class StoredImageViewerTest {
             bitmap.recycle()
             file
         }
-        val scenario = ActivityScenario.launch(
+        val scenario = ActivityScenario.launch<DetailActivity>(
             DetailActivity.newIntent(app, "", "Viewer test", files.map(File::getAbsolutePath))
         )
         try {
