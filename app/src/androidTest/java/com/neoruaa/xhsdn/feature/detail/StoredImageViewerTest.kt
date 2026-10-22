@@ -87,18 +87,19 @@ class StoredImageViewerTest {
         instrumentation.waitForIdleSync()
     }
 
-    private fun awaitText(text: String) = awaitNode { it.text?.toString() == text }
-    private fun awaitDescription(text: String) = awaitNode { it.contentDescription?.toString() == text }
+    private fun awaitText(text: String) = awaitNode("text=$text") { it.text?.toString() == text }
+    private fun awaitDescription(description: String) =
+        awaitNode("description=$description") { it.contentDescription?.toString() == description }
 
-    private fun awaitNode(predicate: (AccessibilityNodeInfo) -> Boolean) {
+    private fun awaitNode(expected: String, predicate: (AccessibilityNodeInfo) -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 8000
         while (SystemClock.uptimeMillis() < deadline) {
             if (findNode(automation.rootInActiveWindow, predicate) != null) return
             SystemClock.sleep(100)
         }
         val tree = accessibilityTree(automation.rootInActiveWindow)
-        Log.e("StoredImageViewerTest", "Expected accessibility node was not displayed: $text\n$tree")
-        assertTrue("Expected accessibility node was not displayed: $text", findNode(automation.rootInActiveWindow, predicate) != null)
+        Log.e("StoredImageViewerTest", "Expected accessibility node was not displayed: $expected\n$tree")
+        assertTrue("Expected accessibility node was not displayed: $expected", findNode(automation.rootInActiveWindow, predicate) != null)
     }
 
     private fun accessibilityTree(node: AccessibilityNodeInfo?, depth: Int = 0): String = buildString {
