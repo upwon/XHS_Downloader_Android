@@ -5,37 +5,17 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.neoruaa.xhsdn.MainActivity
+import com.neoruaa.xhsdn.DetailActivity
 import com.neoruaa.xhsdn.R
 import com.neoruaa.xhsdn.XHSApplication
-import com.neoruaa.xhsdn.data.storage.StoredMediaRef
-import com.neoruaa.xhsdn.ui.StoredImageViewer
-import com.neoruaa.xhsdn.viewmodels.MediaItem
-import com.neoruaa.xhsdn.viewmodels.MediaType
 import java.io.File
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @RunWith(AndroidJUnit4::class)
 class StoredImageViewerTest {
@@ -43,53 +23,49 @@ class StoredImageViewerTest {
     private val automation = instrumentation.uiAutomation
     private val app = ApplicationProvider.getApplicationContext<XHSApplication>()
 
-    @Test fun opensSelectedContentUriAndSwipesBothDirections() {
-        val directory = File(app.cacheDir, "viewer-test-${System.nanoTime()}").apply { mkdirs() }
-        val images = (0..2).map { index ->
+    @Test fun detailImageCardOpensPreviewAndPagerSwipesBothDirections() {
+        val directory = File(app.cacheDir, "detail-viewer-test-${System.nanoTime()}").apply { mkdirs() }
+        val files = (0..2).map { index ->
             val file = File(directory, "image-$index.png")
-            val bitmap = Bitmap.createBitmap(40, 60, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(80, 120, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.rgb(index * 80, 100, 150))
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()
-            val ref = if (index == 1) StoredMediaRef(
-                FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file).toString(),
-                file.name, "image/png"
-            ) else StoredMediaRef.fromLegacyFile(file, "image/png")
-            MediaItem(ref, MediaType.IMAGE)
+            file
         }
-        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        val scenario = ActivityScenario.launch(
+            DetailActivity.newIntent(app, "", "Viewer test", files.map(File::getAbsolutePath))
+        )
         try {
-            scenario.onActivity { activity -> activity.setContent { MiuixTheme {
-                var previewOpen by remember { mutableStateOf(false) }
-                Box(Modifier.fillMaxSize()) {
-                    Box(
-                        Modifier.size(96.dp)
-                            .align(Alignment.Center)
-                            .clickable { previewOpen = true }
-                            .semantics { contentDescription = "open preview" }
-                    )
-                    if (previewOpen) {
-                        StoredImageViewer(
-                            modifier = Modifier.fillMaxSize(),
-                            images = images,
-                            initialPath = images[1].path,
-                            onDismiss = { previewOpen = false }
-                        )
-                    }
-                }
-            } } }
-            tapCenter()
+            clickDescription(files[1].absolutePath)
             awaitText(app.getString(R.string.detail_image_position, 2, 3))
-            awaitDescription("image-1.png")
+            awaitDescription(files[1].absolutePath)
             swipe(forward = true)
             awaitText(app.getString(R.string.detail_image_position, 3, 3))
-            awaitDescription("image-2.png")
+            awaitDescription(files[2].absolutePath)
             swipe(forward = false)
             awaitText(app.getString(R.string.detail_image_position, 2, 3))
         } finally {
             scenario.close()
             directory.deleteRecursively()
         }
+    }
+
+    private fun clickDescription(description: String) {
+        val deadline = SystemClock.uptimeMillis() + 8000
+        while (SystemClock.uptimeMillis() < deadline) {
+            val target = findNode(automation.rootInActiveWindow, { it.contentDescription?.toString() == description })
+            if (target != null) {
+                var clickable: AccessibilityNodeInfo? = target
+                while (clickable != null && !clickable.isClickable) clickable = clickable.parent
+                if (clickable?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
+                    instrumentation.waitForIdleSync()
+                    return
+                }
+            }
+            SystemClock.sleep(100)
+        }
+        assertTrue("Image tile was not clickable: $description", false)
     }
 
     private fun swipe(forward: Boolean) {
@@ -108,38 +84,24 @@ class StoredImageViewerTest {
         instrumentation.waitForIdleSync()
     }
 
-    private fun tapCenter() {
-        val metrics = app.resources.displayMetrics
-        val x = metrics.widthPixels / 2f
-        val y = metrics.heightPixels / 2f
-        val down = SystemClock.uptimeMillis()
-        val downEvent = MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0)
-        val upEvent = MotionEvent.obtain(down, down + 80, MotionEvent.ACTION_UP, x, y, 0)
-        downEvent.source = InputDevice.SOURCE_TOUCHSCREEN
-        upEvent.source = InputDevice.SOURCE_TOUCHSCREEN
-        try {
-            automation.injectInputEvent(downEvent, true)
-            automation.injectInputEvent(upEvent, true)
-        } finally {
-            downEvent.recycle()
-            upEvent.recycle()
-        }
-        instrumentation.waitForIdleSync()
-    }
-
     private fun awaitText(text: String) = awaitNode { it.text?.toString() == text }
     private fun awaitDescription(text: String) = awaitNode { it.contentDescription?.toString() == text }
+
     private fun awaitNode(predicate: (AccessibilityNodeInfo) -> Boolean) {
-        fun contains(node: AccessibilityNodeInfo?): Boolean {
-            if (node == null) return false
-            if (predicate(node)) return true
-            return (0 until node.childCount).any { contains(node.getChild(it)) }
-        }
         val deadline = SystemClock.uptimeMillis() + 8000
         while (SystemClock.uptimeMillis() < deadline) {
-            if (contains(automation.rootInActiveWindow)) return
+            if (findNode(automation.rootInActiveWindow, predicate) != null) return
             SystemClock.sleep(100)
         }
-        assertTrue("Expected viewer node was not displayed", contains(automation.rootInActiveWindow))
+        assertTrue("Expected accessibility node was not displayed", findNode(automation.rootInActiveWindow, predicate) != null)
+    }
+
+    private fun findNode(root: AccessibilityNodeInfo?, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        if (root == null) return null
+        if (predicate(root)) return root
+        for (index in 0 until root.childCount) {
+            findNode(root.getChild(index), predicate)?.let { return it }
+        }
+        return null
     }
 }
