@@ -27,7 +27,14 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
+            test_status=$?
+            if [ "$test_status" -ne 0 ]; then
+              find app/build/outputs/androidTest-results/connected/debug -name '*.xml' -print -exec cat {} \; 2>/dev/null || true
+              adb logcat -d -s StoredImageViewerTest:E AndroidRuntime:E || true
+            fi
+            exit "$test_status"
       - name: Preserve image preview test results
         if: always()
         uses: actions/upload-artifact@v4
