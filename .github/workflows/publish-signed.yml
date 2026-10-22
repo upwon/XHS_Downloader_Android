@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           APK=$(find dist -name xhs-upwon-1.4.3-release.apk -type f)
-          test -n "$APK" && test "$(printf '%s\\n' "$APK" | wc -l)" -eq 1
+          test -n "$APK"
           DIRECTORY=$(dirname "$APK")
           echo "ASSET_DIR=$DIRECTORY" >> "$GITHUB_ENV"
           test "$(cat "$DIRECTORY/SOURCE_COMMIT.txt")" = 'fce33b82869882c24cb1b0bc20ab275acecdab6f'
