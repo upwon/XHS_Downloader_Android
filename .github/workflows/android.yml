@@ -6,6 +6,28 @@ on:
 permissions:
   contents: read
 jobs:
+  image-viewer-instrumentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test image preview and swiping in an isolated emulator job
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
   build:
     runs-on: ubuntu-latest
     steps:
