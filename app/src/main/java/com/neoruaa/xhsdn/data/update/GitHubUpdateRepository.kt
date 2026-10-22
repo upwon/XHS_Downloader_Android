@@ -74,8 +74,8 @@ class GitHubUpdateRepository(
     )
 
     companion object {
-        const val REPOSITORY_URL = "https://github.com/NEORUAA/XHS_Downloader_Android"
-        const val LATEST_RELEASE_URL = "https://api.github.com/repos/NEORUAA/XHS_Downloader_Android/releases/latest"
+        const val REPOSITORY_URL = "https://github.com/upwon/XHS_Downloader_Android"
+        const val LATEST_RELEASE_URL = "https://api.github.com/repos/upwon/XHS_Downloader_Android/releases/latest"
 
         internal fun evaluateRelease(json: JSONObject, currentVersion: String): UpdateCheckResult {
             if (json.getBoolean("draft") || json.getBoolean("prerelease")) return UpdateCheckResult.NoRelease

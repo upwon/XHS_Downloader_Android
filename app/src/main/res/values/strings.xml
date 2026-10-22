@@ -413,4 +413,7 @@
     <string name="settings_default_storage_active">Currently using the default storage location</string>
     <string name="settings_default_storage_help">Show default download locations</string>
     <string name="settings_help_symbol">?</string>
+    <string name="detail_image_position">%1$d / %2$d</string>
+    <string name="detail_image_loading">Loading image…</string>
+    <string name="detail_image_unavailable">Unable to read this image. It may have been moved, deleted, or access was revoked.</string>
 </resources>

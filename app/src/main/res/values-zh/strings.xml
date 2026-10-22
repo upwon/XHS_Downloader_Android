@@ -413,4 +413,7 @@
     <string name="settings_default_storage_active">当前使用默认存储位置</string>
     <string name="settings_default_storage_help">查看默认下载位置</string>
     <string name="settings_help_symbol">?</string>
+    <string name="detail_image_position">%1$d / %2$d</string>
+    <string name="detail_image_loading">正在加载图片…</string>
+    <string name="detail_image_unavailable">无法读取图片，文件可能已移动、删除或访问权限已失效。</string>
 </resources>

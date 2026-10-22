@@ -396,6 +396,20 @@ private fun DetailScreen(
     onWebCrawl: () -> Unit,
     topBarState: TopAppBarState
 ) {
+    var previewPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val images = remember(uiState.mediaItems, uiState.downloadCards) {
+        (uiState.downloadCards.mapNotNull { it.stored } + uiState.mediaItems)
+            .filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
+    }
+    previewPath?.let { path ->
+        if (images.any { it.path == path }) {
+            com.neoruaa.xhsdn.ui.StoredImageViewer(
+                images = images,
+                initialPath = path,
+                onDismiss = { previewPath = null }
+            )
+        }
+    }
     val scrollBehavior = MiuixScrollBehavior(state = topBarState)
     val windowLayoutInfo = rememberWindowLayoutInfo()
     val topBarBackdrop = rememberMiuixTopBarBackdrop()
@@ -468,7 +482,9 @@ private fun DetailScreen(
     ) { padding ->
         FilesPage(
             uiState = uiState,
-            onMediaClick = onMediaClick,
+            onMediaClick = { item ->
+                if (item.type == MediaType.IMAGE) previewPath = item.path else onMediaClick(item)
+            },
             onDeleteMedia = onDeleteMedia,
             topPadding = padding.calculateTopPadding(),
             contentStartPadding = windowLayoutInfo.contentStartPadding,

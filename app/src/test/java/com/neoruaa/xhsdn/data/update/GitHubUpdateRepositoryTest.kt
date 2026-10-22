@@ -37,7 +37,7 @@ class GitHubUpdateRepositoryTest {
             val result = repository.check() as UpdateCheckResult.Available
             assertEquals("v1.5.0", result.release.tag)
             assertEquals("Release notes", result.release.notes)
-            assertEquals("https://github.com/NEORUAA/XHS_Downloader_Android/releases/tag/v1.5.0", result.release.url)
+            assertEquals("https://github.com/upwon/XHS_Downloader_Android/releases/tag/v1.5.0", result.release.url)
         }
         for (tag in listOf("1.3.5", "v1.4.0", "1.4+build.1")) {
             withResponse(200, release(tag).toString()) { assertEquals(UpdateCheckResult.UpToDate(tag), it.check()) }
