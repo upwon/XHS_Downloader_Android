@@ -2,6 +2,7 @@ package com.neoruaa.xhsdn.feature.detail
 
 import android.graphics.Bitmap
 import android.os.SystemClock
+import android.util.Log
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -65,6 +66,8 @@ class StoredImageViewerTest {
             }
             SystemClock.sleep(100)
         }
+        val tree = accessibilityTree(automation.rootInActiveWindow)
+        Log.e("StoredImageViewerTest", "Image tile was not clickable: $description\n$tree")
         assertTrue("Image tile was not clickable: $description", false)
     }
 
@@ -93,7 +96,17 @@ class StoredImageViewerTest {
             if (findNode(automation.rootInActiveWindow, predicate) != null) return
             SystemClock.sleep(100)
         }
-        assertTrue("Expected accessibility node was not displayed", findNode(automation.rootInActiveWindow, predicate) != null)
+        val tree = accessibilityTree(automation.rootInActiveWindow)
+        Log.e("StoredImageViewerTest", "Expected accessibility node was not displayed: $text\n$tree")
+        assertTrue("Expected accessibility node was not displayed: $text", findNode(automation.rootInActiveWindow, predicate) != null)
+    }
+
+    private fun accessibilityTree(node: AccessibilityNodeInfo?, depth: Int = 0): String = buildString {
+        if (node == null) return@buildString
+        append("  ".repeat(depth))
+        append("text=").append(node.text).append(", description=").append(node.contentDescription)
+            .append(", clickable=").append(node.isClickable).append('\n')
+        for (index in 0 until node.childCount) append(accessibilityTree(node.getChild(index), depth + 1))
     }
 
     private fun findNode(root: AccessibilityNodeInfo?, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
