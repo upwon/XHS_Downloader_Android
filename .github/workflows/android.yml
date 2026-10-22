@@ -38,8 +38,8 @@ jobs:
           if [[ -n "$SIGNING_KEY" && -n "$SIGNING_PROPERTIES" ]]; then
             umask 077
             printf '%s' "$SIGNING_KEY" | base64 --decode > app/release_keystore.jks
-            printf '%s\\n' "$SIGNING_PROPERTIES" > keystore.properties
-            printf '\\nstoreFile=app/release_keystore.jks\\n' >> keystore.properties
+            printf '%s\n' "$SIGNING_PROPERTIES" > keystore.properties
+            printf '\nstoreFile=app/release_keystore.jks\n' >> keystore.properties
             echo 'task=assembleRelease' >> "$GITHUB_OUTPUT"
             echo 'variant=release' >> "$GITHUB_OUTPUT"
           else
