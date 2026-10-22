@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.graphics.Rect
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -63,12 +64,33 @@ class StoredImageViewerTest {
                     instrumentation.waitForIdleSync()
                     return
                 }
+                val bounds = Rect().also(target::getBoundsInScreen)
+                if (!bounds.isEmpty) {
+                    tap(bounds.exactCenterX(), bounds.exactCenterY())
+                    instrumentation.waitForIdleSync()
+                    return
+                }
             }
             SystemClock.sleep(100)
         }
         val tree = accessibilityTree(automation.rootInActiveWindow)
         Log.e("StoredImageViewerTest", "Image tile was not clickable: $description\n$tree")
         assertTrue("Image tile was not clickable: $description", false)
+    }
+
+    private fun tap(x: Float, y: Float) {
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = MotionEvent.obtain(downTime, downTime + 80, MotionEvent.ACTION_UP, x, y, 0)
+        down.source = InputDevice.SOURCE_TOUCHSCREEN
+        up.source = InputDevice.SOURCE_TOUCHSCREEN
+        try {
+            automation.injectInputEvent(down, true)
+            automation.injectInputEvent(up, true)
+        } finally {
+            down.recycle()
+            up.recycle()
+        }
     }
 
     private fun swipe(forward: Boolean) {
