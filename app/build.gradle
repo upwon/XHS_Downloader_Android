@@ -28,18 +28,29 @@ android {
         signingPropertiesFile.withInputStream { signingProperties.load(it) }
     }
 
+    // Accept both this project's properties and the existing YTDLnis property names.
+    def signingValue = { name ->
+        signingProperties.getProperty(name, signingProperties.getProperty("signingConfig.${name}"))
+    }
+    def hasReleaseSigning = ["storeFile", "storePassword", "keyAlias", "keyPassword"].every { name ->
+        def value = signingValue(name)
+        value != null && !value.trim().isEmpty()
+    }
+
     signingConfigs {
         release {
-            storeFile rootProject.file(signingProperties.getProperty("storeFile", "release-keystore.jks"))
-            storePassword signingProperties.getProperty("storePassword")
-            keyAlias signingProperties.getProperty("keyAlias", "xhsdownloader-release")
-            keyPassword signingProperties.getProperty("keyPassword")
+            storeFile rootProject.file(signingValue("storeFile") ?: "release-keystore.jks")
+            storePassword signingValue("storePassword")
+            keyAlias signingValue("keyAlias") ?: "xhsdownloader-release"
+            keyPassword signingValue("keyPassword")
         }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
