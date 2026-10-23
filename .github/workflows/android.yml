@@ -23,9 +23,9 @@ jobs:
       - name: Exercise downloaded image preview on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           arch: x86_64
-          profile: pixel_2
+          profile: pixel_7_pro
           disable-animations: true
           script: |
             ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
