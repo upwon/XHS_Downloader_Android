@@ -20,9 +20,14 @@ jobs:
         with:
           packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
+      - name: Enable KVM for the runner
+        run: |
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
       - name: Exercise downloaded image preview on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
+          disable-linux-hw-accel: false
           api-level: 34
           arch: x86_64
           profile: pixel_7_pro
