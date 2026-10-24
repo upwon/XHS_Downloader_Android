@@ -1,19 +1,28 @@
 package com.neoruaa.xhsdn
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ContentResolver
 import android.content.Intent
-import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.DocumentsContract
+import android.provider.DocumentsContract.Document
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,7 +35,9 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -36,8 +47,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -51,10 +64,23 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import com.kyant.capsule.ContinuousRoundedRectangle
+import com.neoruaa.xhsdn.data.settings.AppSettings
+import com.neoruaa.xhsdn.data.settings.SettingsRepository
+import com.neoruaa.xhsdn.data.settings.formatStorageDocumentPath
+import com.neoruaa.xhsdn.data.settings.storageDisplayPathFromTreeUri
+import com.neoruaa.xhsdn.ui.ActionIconButton
+import com.neoruaa.xhsdn.ui.AdaptiveTopAppBar
+import com.neoruaa.xhsdn.ui.TopAppBarIconButton
+import com.neoruaa.xhsdn.ui.groupedCardItems
+import com.neoruaa.xhsdn.ui.miuixBackdropSource
+import com.neoruaa.xhsdn.ui.miuixVerticalScrollEffects
+import com.neoruaa.xhsdn.ui.rememberMiuixTopBarBackdrop
+import com.neoruaa.xhsdn.ui.rememberWindowLayoutInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -64,18 +90,20 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.menu.OverlayDropdownMenu
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.squircle.squircleBorder
 import android.graphics.Color as AndroidColor
-
-private const val PREFS_NAME = "XHSDownloaderPrefs"
 
 data class SettingsUiState(
     val createLivePhotos: Boolean = true,
@@ -83,121 +111,170 @@ data class SettingsUiState(
     val template: TextFieldValue = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE),
     val tokens: List<NamingFormat.TokenDefinition> = emptyList(),
     val debugNotificationEnabled: Boolean = false,
+    val selectiveDownload: Boolean = false,
+    val showMediaResolution: Boolean = false,
+    val keepScreenOn: Boolean = false,
     val showClipboardBubble: Boolean = true,
     val autoReadClipboard: Boolean = false,
-    val manualInputLinks: Boolean = false
+    val manualInputLinks: Boolean = false,
+    val customStorageTreeUri: String? = null,
+    val customStorageDisplayName: String? = null,
+    val checkExistingFilesBeforeSave: Boolean = true
 )
 
-class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
-    private val _state = MutableStateFlow(loadState())
+class SettingsViewModel(
+    private val repository: SettingsRepository
+) : ViewModel() {
+    private val _state = MutableStateFlow(repository.currentSettings.toUiState())
     val state: StateFlow<SettingsUiState> = _state
+    private val persistenceMutex = Mutex()
     private var hasChanges = false
 
-    private fun loadState(): SettingsUiState {
-        val createLivePhotos = prefs.getBoolean("create_live_photos", true)
-        val hasNewFlag = prefs.contains("use_custom_naming_format")
-        val legacyFlag = prefs.getBoolean("use_metadata_file_names", false)
-        val useCustomNaming = if (hasNewFlag) prefs.getBoolean("use_custom_naming_format", false) else legacyFlag
-        var template = prefs.getString("custom_naming_template", NamingFormat.DEFAULT_TEMPLATE)
-        if (template.isNullOrEmpty()) {
-            template = NamingFormat.DEFAULT_TEMPLATE
+    init {
+        viewModelScope.launch {
+            repository.settings.collect { settings ->
+                val currentTemplate = _state.value.template
+                _state.value = settings.toUiState(
+                    templateValue = if (currentTemplate.text == settings.customNamingTemplate) {
+                        currentTemplate
+                    } else {
+                        TextFieldValue(settings.customNamingTemplate)
+                    }
+                )
+            }
         }
-        val debugNotificationEnabled = prefs.getBoolean("debug_notification_enabled", false)
-        val showClipboardBubble = prefs.getBoolean("show_clipboard_bubble", true) // Default true
-        val autoReadClipboard = prefs.getBoolean("auto_read_clipboard", false)
-        val manualInputLinks = prefs.getBoolean("manual_input_links", false)
-        return SettingsUiState(
-            createLivePhotos = createLivePhotos,
-            useCustomNaming = useCustomNaming,
-            template = TextFieldValue(template),
-            tokens = NamingFormat.getAvailableTokens(),
-            debugNotificationEnabled = debugNotificationEnabled,
-            showClipboardBubble = showClipboardBubble,
-            autoReadClipboard = autoReadClipboard,
-            manualInputLinks = manualInputLinks
-        )
     }
 
-
-
     fun onCreateLivePhotosChange(enabled: Boolean) = updateState {
-        it.copy(createLivePhotos = enabled).also { newState ->
-            persist(newState)
-        }
+        it.copy(createLivePhotos = enabled)
     }
 
     fun onUseCustomNamingChange(enabled: Boolean) = updateState {
-        it.copy(useCustomNaming = enabled).also { newState ->
-            persist(newState)
-        }
+        it.copy(useCustomNaming = enabled)
     }
 
     fun onTemplateChange(value: TextFieldValue) = updateState {
-        it.copy(template = value).also { newState ->
-            persist(newState)
-        }
+        it.copy(template = value)
     }
 
     fun onResetTemplate() = updateState {
-        it.copy(template = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE)).also { newState ->
-            persist(newState)
-        }
+        it.copy(template = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE))
     }
 
-
-
     fun onDebugNotificationChange(enabled: Boolean) = updateState {
-        it.copy(debugNotificationEnabled = enabled).also { newState ->
-            persist(newState)
-        }
+        it.copy(debugNotificationEnabled = enabled)
+    }
+
+    fun onSelectiveDownloadChange(enabled: Boolean) = updateState {
+        it.copy(selectiveDownload = enabled)
+    }
+
+    fun onShowMediaResolutionChange(enabled: Boolean) = updateState {
+        it.copy(showMediaResolution = enabled)
+    }
+
+    fun onKeepScreenOnChange(enabled: Boolean) = updateState {
+        it.copy(keepScreenOn = enabled)
     }
 
     fun onShowClipboardBubbleChange(enabled: Boolean) = updateState {
-        it.copy(showClipboardBubble = enabled).also { newState ->
-            persist(newState)
-        }
+        it.copy(showClipboardBubble = enabled)
     }
 
     fun onAutoReadClipboardChange(enabled: Boolean) = updateState {
-        it.copy(autoReadClipboard = enabled).also { newState ->
-            persist(newState)
-        }
+        it.copy(autoReadClipboard = enabled)
     }
 
     fun onManualInputLinksChange(enabled: Boolean) = updateState {
-        it.copy(manualInputLinks = enabled).also { newState ->
-            persist(newState)
+        it.copy(manualInputLinks = enabled)
+    }
+
+    fun onCheckExistingFilesBeforeSaveChange(enabled: Boolean) = updateState {
+        it.copy(checkExistingFilesBeforeSave = enabled)
+    }
+
+    fun onCustomStorageLocationSelected(uri: String, displayName: String?) {
+        updateState {
+            it.copy(
+                customStorageTreeUri = uri,
+                customStorageDisplayName = displayName
+            )
         }
     }
 
-    private fun persist(state: SettingsUiState) {
+    fun onResetCustomStorageLocation() {
+        updateState {
+            it.copy(
+                customStorageTreeUri = null,
+                customStorageDisplayName = null
+            )
+        }
+    }
+
+    private fun persist(change: (SettingsUiState) -> SettingsUiState) {
         hasChanges = true
-        prefs.edit()
-            .putBoolean("create_live_photos", state.createLivePhotos)
-            .putBoolean("use_custom_naming_format", state.useCustomNaming)
-            .putString("custom_naming_template", state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE })
-            .putBoolean("debug_notification_enabled", state.debugNotificationEnabled)
-            .putBoolean("show_clipboard_bubble", state.showClipboardBubble)
-            .putBoolean("auto_read_clipboard", state.autoReadClipboard)
-            .putBoolean("manual_input_links", state.manualInputLinks)
-            .remove("use_metadata_file_names")
-            .apply()
+        viewModelScope.launch {
+            persistenceMutex.withLock {
+                repository.awaitReady()
+                repository.update { current ->
+                    // Apply only this user action to the latest persisted snapshot.
+                    val state = change(current.toUiState())
+                    current.copy(
+                        createLivePhotos = state.createLivePhotos,
+                        useCustomNamingFormat = state.useCustomNaming,
+                        customNamingTemplate = state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE },
+                        debugNotificationEnabled = state.debugNotificationEnabled,
+                        selectiveDownload = state.selectiveDownload,
+                        showMediaResolution = state.showMediaResolution,
+                        keepScreenOn = state.keepScreenOn,
+                        showClipboardBubble = state.showClipboardBubble,
+                        autoReadClipboard = state.autoReadClipboard,
+                        manualInputLinks = state.manualInputLinks,
+                        customStorageTreeUri = state.customStorageTreeUri,
+                        customStorageDisplayName = state.customStorageDisplayName,
+                        checkExistingFilesBeforeSave = state.checkExistingFilesBeforeSave,
+                        useMetadataFileNames = false
+                    )
+                }
+            }
+        }
     }
 
     fun hasChanges(): Boolean = hasChanges
 
     private fun updateState(block: (SettingsUiState) -> SettingsUiState) {
-        viewModelScope.launch {
-            _state.emit(block(_state.value))
-        }
+        val updated = block(_state.value)
+        _state.value = updated
+        persist(block)
     }
+
+    private fun AppSettings.toUiState(
+        templateValue: TextFieldValue = TextFieldValue(customNamingTemplate)
+    ): SettingsUiState = SettingsUiState(
+        createLivePhotos = createLivePhotos,
+        useCustomNaming = useCustomNamingFormat,
+        template = templateValue,
+        tokens = NamingFormat.getAvailableTokens(),
+        debugNotificationEnabled = debugNotificationEnabled,
+        selectiveDownload = selectiveDownload,
+        showMediaResolution = showMediaResolution,
+        keepScreenOn = keepScreenOn,
+        showClipboardBubble = showClipboardBubble,
+        autoReadClipboard = autoReadClipboard,
+        manualInputLinks = manualInputLinks,
+        customStorageTreeUri = customStorageTreeUri,
+        customStorageDisplayName = customStorageDisplayName,
+        checkExistingFilesBeforeSave = checkExistingFilesBeforeSave
+    )
 }
 
-class SettingsViewModelFactory(private val prefs: SharedPreferences) : ViewModelProvider.Factory {
+class SettingsViewModelFactory(
+    private val repository: SettingsRepository
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return SettingsViewModel(prefs) as T
+            return SettingsViewModel(repository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
@@ -205,7 +282,30 @@ class SettingsViewModelFactory(private val prefs: SharedPreferences) : ViewModel
 
 class SettingsActivity : ComponentActivity() {
     private val viewModel: SettingsViewModel by viewModels {
-        SettingsViewModelFactory(getSharedPreferences(PREFS_NAME, MODE_PRIVATE))
+        SettingsViewModelFactory(
+            (application as XHSApplication).appContainer.settingsRepository
+        )
+    }
+
+    private val storageTreeLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        handleStorageTreeResult(result.data)
+    }
+
+    private var pendingCheckExistingFilesChange: Boolean? = null
+
+    private val allFilesAccessLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val requestedValue = pendingCheckExistingFilesChange
+        pendingCheckExistingFilesChange = null
+        if (requestedValue == true && hasAllFilesAccess()) {
+            viewModel.onCheckExistingFilesBeforeSaveChange(true)
+        } else if (requestedValue == true) {
+            showStorageMessage(R.string.settings_check_existing_permission_denied)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -238,17 +338,24 @@ class SettingsActivity : ComponentActivity() {
             MiuixTheme(controller = controller) {
                 SettingsScreen(
                     uiState = uiState,
-                    onBack = { finishWithResult() },
+                    onBack = ::finishWithResult,
                     onCreateLivePhotosChange = viewModel::onCreateLivePhotosChange,
                     onUseCustomNamingChange = viewModel::onUseCustomNamingChange,
                     onTemplateChange = viewModel::onTemplateChange,
                     onResetTemplate = viewModel::onResetTemplate,
                     onDebugNotificationChange = viewModel::onDebugNotificationChange,
+                    onSelectiveDownloadChange = viewModel::onSelectiveDownloadChange,
+                    onShowMediaResolutionChange = viewModel::onShowMediaResolutionChange,
+                    onKeepScreenOnChange = viewModel::onKeepScreenOnChange,
                     onShowClipboardBubbleChange = viewModel::onShowClipboardBubbleChange,
                     onAutoReadClipboardChange = viewModel::onAutoReadClipboardChange,
                     onManualInputLinksChange = viewModel::onManualInputLinksChange,
+                    onCheckExistingFilesBeforeSaveChange = ::onCheckExistingFilesBeforeSaveChange,
+                    onStorageLocationClick = ::openStorageTreePicker,
+                    onResetStorageLocation = viewModel::onResetCustomStorageLocation,
                     topBarState = topBarState
                 )
+                com.neoruaa.xhsdn.feature.update.UpdateDialog((application as XHSApplication).appContainer.updateChecker)
             }
         }
     }
@@ -262,10 +369,350 @@ class SettingsActivity : ComponentActivity() {
         // No-op
     }
 
+    private fun onCheckExistingFilesBeforeSaveChange(enabled: Boolean) {
+        if (!enabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            viewModel.onCheckExistingFilesBeforeSaveChange(enabled)
+            return
+        }
+        if (hasAllFilesAccess()) {
+            viewModel.onCheckExistingFilesBeforeSaveChange(true)
+            return
+        }
+        pendingCheckExistingFilesChange = true
+        launchAllFilesAccessSettings()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun launchAllFilesAccessSettings() {
+        val appSpecificIntent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        try {
+            allFilesAccessLauncher.launch(appSpecificIntent)
+        } catch (_: ActivityNotFoundException) {
+            val globalIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            try {
+                allFilesAccessLauncher.launch(globalIntent)
+            } catch (_: ActivityNotFoundException) {
+                pendingCheckExistingFilesChange = null
+                showStorageMessage(R.string.settings_check_existing_permission_unavailable)
+            }
+        }
+    }
+
+    private fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+    private fun openStorageTreePicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+        }
+        try {
+            storageTreeLauncher.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+            showStorageMessage(R.string.storage_location_picker_unavailable)
+        }
+    }
+
+    private fun handleStorageTreeResult(data: Intent?) {
+        val uri = data?.data ?: return
+        val resultFlags = data.flags and
+            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val selection = validateStorageTree(uri, resultFlags) ?: return
+        viewModel.onCustomStorageLocationSelected(selection.uri.toString(), selection.displayName)
+    }
+
+    private fun validateStorageTree(uri: Uri, resultFlags: Int): StorageTreeSelection? {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT ||
+            uri.authority != EXTERNAL_STORAGE_AUTHORITY
+        ) {
+            showStorageMessage(R.string.storage_location_local_only)
+            return null
+        }
+        if (resultFlags !=
+            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        ) {
+            showStorageMessage(R.string.storage_location_permission_required)
+            return null
+        }
+
+        val documentId = runCatching {
+            DocumentsContract.getTreeDocumentId(uri)
+        }.getOrNull()
+        if (documentId.isNullOrBlank()) {
+            showStorageMessage(R.string.storage_location_invalid)
+            return null
+        }
+
+        val documentUri = runCatching {
+            DocumentsContract.buildDocumentUriUsingTree(uri, documentId)
+        }.getOrNull()
+        if (documentUri == null) {
+            showStorageMessage(R.string.storage_location_invalid)
+            return null
+        }
+
+        val document = runCatching {
+            contentResolver.query(
+                documentUri,
+                arrayOf(Document.COLUMN_MIME_TYPE, Document.COLUMN_FLAGS),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    null
+                } else {
+                    val mimeType = cursor.getString(0)
+                    val flags = cursor.getInt(1)
+                    StorageDocumentInfo(mimeType, flags)
+                }
+            }
+        }.getOrNull()
+        if (document == null ||
+            document.mimeType != Document.MIME_TYPE_DIR ||
+            document.flags and Document.FLAG_DIR_SUPPORTS_CREATE == 0
+        ) {
+            showStorageMessage(R.string.storage_location_not_writable)
+            return null
+        }
+
+        val persistableFlags = resultFlags and
+            (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        try {
+            contentResolver.takePersistableUriPermission(uri, persistableFlags)
+        } catch (_: SecurityException) {
+            showStorageMessage(R.string.storage_location_permission_required)
+            return null
+        }
+
+        val persistedPermission = contentResolver.persistedUriPermissions.firstOrNull {
+            it.uri == uri
+        }
+        if (persistedPermission == null ||
+            !persistedPermission.isReadPermission ||
+            !persistedPermission.isWritePermission
+        ) {
+            showStorageMessage(R.string.storage_location_permission_required)
+            return null
+        }
+
+        val displayName = formatStorageDocumentPath(documentId) ?: uri.toString()
+        return StorageTreeSelection(uri, displayName)
+    }
+
+    private fun showStorageMessage(messageResId: Int) {
+        Toast.makeText(this, getString(messageResId), Toast.LENGTH_SHORT).show()
+    }
+
+    private data class StorageTreeSelection(
+        val uri: Uri,
+        val displayName: String
+    )
+
+    private data class StorageDocumentInfo(
+        val mimeType: String?,
+        val flags: Int
+    )
+
+    private companion object {
+        const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+    }
+
     private fun finishWithResult() {
         setResult(if (viewModel.hasChanges()) RESULT_OK else RESULT_CANCELED)
         finish()
     }
+}
+
+@Composable
+internal fun SettingsRoute(onBack: () -> Unit, onOpenAdvanced: ((Int) -> Unit)? = null, onOpenAccount: (() -> Unit)? = null) {
+    val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val repository = remember(context) {
+        (context.applicationContext as XHSApplication).appContainer.settingsRepository
+    }
+    val activity = context as ComponentActivity
+    val routeViewModel = remember(activity, repository) {
+        ViewModelProvider(activity, SettingsViewModelFactory(repository))[
+            "settings_route",
+            SettingsViewModel::class.java
+        ]
+    }
+    val uiState by routeViewModel.state.collectAsStateWithLifecycle()
+    val topBarState = rememberTopAppBarState()
+    val pendingCheckExistingFilesChange = remember { mutableStateOf<Boolean?>(null) }
+
+    fun showMessage(messageResId: Int) {
+        Toast.makeText(context, resources.getString(messageResId), Toast.LENGTH_SHORT).show()
+    }
+
+    val storageTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val uri = data?.data
+            if (uri != null) {
+                val resultFlags = data.flags and
+                    (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                validateRouteStorageTree(context, uri, resultFlags, ::showMessage)?.let { selection ->
+                    routeViewModel.onCustomStorageLocationSelected(
+                        selection.first.toString(),
+                        selection.second
+                    )
+                }
+            }
+        }
+    }
+    val allFilesAccessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val requestedValue = pendingCheckExistingFilesChange.value
+        pendingCheckExistingFilesChange.value = null
+        if (requestedValue == true &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager())
+        ) {
+            routeViewModel.onCheckExistingFilesBeforeSaveChange(true)
+        } else if (requestedValue == true) {
+            showMessage(R.string.settings_check_existing_permission_denied)
+        }
+    }
+
+    fun openStorageTreePicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+        }
+        try {
+            storageTreeLauncher.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+            showMessage(R.string.storage_location_picker_unavailable)
+        }
+    }
+
+    fun updateCheckExistingFiles(enabled: Boolean) {
+        if (!enabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            routeViewModel.onCheckExistingFilesBeforeSaveChange(enabled)
+            return
+        }
+        if (Environment.isExternalStorageManager()) {
+            routeViewModel.onCheckExistingFilesBeforeSaveChange(true)
+            return
+        }
+        pendingCheckExistingFilesChange.value = true
+        val appSpecificIntent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        )
+        try {
+            allFilesAccessLauncher.launch(appSpecificIntent)
+        } catch (_: ActivityNotFoundException) {
+            try {
+                allFilesAccessLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            } catch (_: ActivityNotFoundException) {
+                pendingCheckExistingFilesChange.value = null
+                showMessage(R.string.settings_check_existing_permission_unavailable)
+            }
+        }
+    }
+
+    SettingsScreen(
+        uiState = uiState,
+        onBack = onBack,
+        onCreateLivePhotosChange = routeViewModel::onCreateLivePhotosChange,
+        onUseCustomNamingChange = routeViewModel::onUseCustomNamingChange,
+        onTemplateChange = routeViewModel::onTemplateChange,
+        onResetTemplate = routeViewModel::onResetTemplate,
+        onDebugNotificationChange = routeViewModel::onDebugNotificationChange,
+        onSelectiveDownloadChange = routeViewModel::onSelectiveDownloadChange,
+        onShowMediaResolutionChange = routeViewModel::onShowMediaResolutionChange,
+        onKeepScreenOnChange = routeViewModel::onKeepScreenOnChange,
+        onShowClipboardBubbleChange = routeViewModel::onShowClipboardBubbleChange,
+        onAutoReadClipboardChange = routeViewModel::onAutoReadClipboardChange,
+        onManualInputLinksChange = routeViewModel::onManualInputLinksChange,
+        onCheckExistingFilesBeforeSaveChange = ::updateCheckExistingFiles,
+        onStorageLocationClick = ::openStorageTreePicker,
+        onResetStorageLocation = routeViewModel::onResetCustomStorageLocation,
+        topBarState = topBarState,
+        onOpenAdvanced = onOpenAdvanced,
+        onOpenAccount = onOpenAccount
+    )
+}
+
+private fun validateRouteStorageTree(
+    context: android.content.Context,
+    uri: Uri,
+    resultFlags: Int,
+    onError: (Int) -> Unit
+): Pair<Uri, String>? {
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT ||
+        uri.authority != "com.android.externalstorage.documents"
+    ) {
+        onError(R.string.storage_location_local_only)
+        return null
+    }
+    if (resultFlags !=
+        (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+    ) {
+        onError(R.string.storage_location_permission_required)
+        return null
+    }
+    val documentId = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+    if (documentId.isNullOrBlank()) {
+        onError(R.string.storage_location_invalid)
+        return null
+    }
+    val documentUri = runCatching {
+        DocumentsContract.buildDocumentUriUsingTree(uri, documentId)
+    }.getOrNull()
+    if (documentUri == null) {
+        onError(R.string.storage_location_invalid)
+        return null
+    }
+    val document = runCatching {
+        context.contentResolver.query(
+            documentUri,
+            arrayOf(Document.COLUMN_MIME_TYPE, Document.COLUMN_FLAGS),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) null else cursor.getString(0) to cursor.getInt(1)
+        }
+    }.getOrNull()
+    if (document == null ||
+        document.first != Document.MIME_TYPE_DIR ||
+        document.second and Document.FLAG_DIR_SUPPORTS_CREATE == 0
+    ) {
+        onError(R.string.storage_location_not_writable)
+        return null
+    }
+    try {
+        context.contentResolver.takePersistableUriPermission(uri, resultFlags)
+    } catch (_: SecurityException) {
+        onError(R.string.storage_location_permission_required)
+        return null
+    }
+    val persistedPermission = context.contentResolver.persistedUriPermissions.firstOrNull {
+        it.uri == uri
+    }
+    if (persistedPermission == null ||
+        !persistedPermission.isReadPermission ||
+        !persistedPermission.isWritePermission
+    ) {
+        onError(R.string.storage_location_permission_required)
+        return null
+    }
+    return uri to (formatStorageDocumentPath(documentId) ?: uri.toString())
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -278,27 +725,69 @@ private fun SettingsScreen(
     onTemplateChange: (TextFieldValue) -> Unit,
     onResetTemplate: () -> Unit,
     onDebugNotificationChange: (Boolean) -> Unit,
+    onSelectiveDownloadChange: (Boolean) -> Unit,
+    onShowMediaResolutionChange: (Boolean) -> Unit,
+    onKeepScreenOnChange: (Boolean) -> Unit,
     onShowClipboardBubbleChange: (Boolean) -> Unit,
     onAutoReadClipboardChange: (Boolean) -> Unit,
     onManualInputLinksChange: (Boolean) -> Unit,
-    topBarState: TopAppBarState
+    onCheckExistingFilesBeforeSaveChange: (Boolean) -> Unit,
+    onStorageLocationClick: () -> Unit,
+    onResetStorageLocation: () -> Unit,
+    topBarState: TopAppBarState,
+    onOpenAdvanced: ((Int) -> Unit)? = null,
+    onOpenAccount: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    var localAdvanced by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Int?>(null) }
+    if (localAdvanced != null) {
+        androidx.activity.compose.BackHandler { localAdvanced = null }
+        com.neoruaa.xhsdn.feature.settings.DownloadSettingsRoute(localAdvanced!!, onBack = { localAdvanced = null },
+            onOpenBrowser = { context.startActivity(Intent(context, WebViewActivity::class.java).putExtra("url", "https://www.xiaohongshu.com")) })
+        return
+    }
+    val openAdvanced: (Int) -> Unit = onOpenAdvanced ?: { localAdvanced = it }
+    val updateChecker = remember(context) { (context.applicationContext as XHSApplication).appContainer.updateChecker }
+    val updateState by updateChecker.state.collectAsStateWithLifecycle()
     val scrollBehavior = top.yukonga.miuix.kmp.basic.MiuixScrollBehavior(state = topBarState)
+    val windowLayoutInfo = rememberWindowLayoutInfo()
+    val topBarBackdrop = rememberMiuixTopBarBackdrop()
+    val downloadRows = buildList {
+        add("storage_location")
+        if (uiState.customStorageTreeUri != null) {
+            add("check_existing_files_before_save")
+        }
+        add("media_advanced")
+        add("archive_advanced")
+        add("network_advanced")
+        add("selective_download")
+        add("media_card_info")
+        add("debug_notifications")
+        add("keep_screen_on")
+    }
+    val clipboardRows = buildList {
+        add("manual_input_links")
+        if (!uiState.manualInputLinks) {
+            add("show_clipboard_bubble")
+            add("auto_read_clipboard")
+        }
+    }
 
     top.yukonga.miuix.kmp.basic.Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets.statusBars
             .union(androidx.compose.foundation.layout.WindowInsets.displayCutout),
         topBar = {
-            TopAppBar(
+            AdaptiveTopAppBar(
                 title = stringResource(R.string.settings),
+                isWideScreen = windowLayoutInfo.isWideScreen,
+                backdrop = topBarBackdrop,
                 navigationIcon = {
-                    Icon(
+                    TopAppBarIconButton(
                         imageVector = MiuixIcons.Back,
                         contentDescription = stringResource(R.string.back),
+                        onClick = onBack,
                         modifier = Modifier
-                            .padding(start = 12.dp)
-                            .clickable { onBack() }
+                            .padding(start = 4.dp)
                     )
                 },
                 scrollBehavior = scrollBehavior
@@ -308,180 +797,261 @@ private fun SettingsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .miuixBackdropSource(topBarBackdrop)
+                .miuixVerticalScrollEffects()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
-                .background(MiuixTheme.colorScheme.surface)
-                .padding(padding),
-            contentPadding = PaddingValues(bottom = 20.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
-//            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .background(MiuixTheme.colorScheme.surface),
+            overscrollEffect = null,
+            contentPadding = PaddingValues(
+                start = windowLayoutInfo.contentStartPadding,
+                top = padding.calculateTopPadding(),
+                end = windowLayoutInfo.contentEndPadding
+            )
         ) {
-            item {
-                Spacer(modifier = Modifier.size(12.dp))
+            item(key = "account_top_spacing") { Spacer(Modifier.height(12.dp)) }
+            item(key = "web_account") {
+                com.neoruaa.xhsdn.feature.settings.WebAccountCard(
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
+                    onClick = onOpenAccount ?: {
+                        context.startActivity(Intent(context, WebViewActivity::class.java)
+                            .putExtra("url", com.neoruaa.xhsdn.data.account.XhsWebSession.HOME))
+                    }
+                )
             }
-
-            item {
+            item(key = "download_options_title") {
                 SmallTitle(stringResource(R.string.download_options))
             }
 
-            item {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp)
-                ) {
-                    MiuixSwitchWidget(
-                        title = stringResource(R.string.create_live_photos),
-                        description = stringResource(R.string.create_live_photos_desc),
-                        checked = uiState.createLivePhotos,
-                        onCheckedChange = onCreateLivePhotosChange
+            groupedCardItems(
+                items = downloadRows,
+                key = { "download_option_$it" }
+            ) { row ->
+                when (row) {
+                    "storage_location" -> if (uiState.customStorageTreeUri == null) {
+                        com.neoruaa.xhsdn.feature.settings.DefaultStoragePreference(
+                            onClick = onStorageLocationClick
+                        )
+                    } else {
+                        BasicComponent(
+                            title = stringResource(R.string.storage_location),
+                            summary = storageDisplayPathFromTreeUri(uiState.customStorageTreeUri)
+                                ?: uiState.customStorageDisplayName
+                                ?: stringResource(R.string.storage_location_selected_folder),
+                            onClick = onStorageLocationClick,
+                            endActions = {
+                                ActionIconButton(
+                                    imageVector = MiuixIcons.Refresh,
+                                    contentDescription = stringResource(R.string.storage_location_reset),
+                                    onClick = onResetStorageLocation
+                                )
+                            }
+                        )
+                    }
+                    "check_existing_files_before_save" -> MiuixSwitchWidget(
+                        title = stringResource(R.string.settings_check_existing_files_before_save),
+                        description = stringResource(
+                            if (uiState.checkExistingFilesBeforeSave) {
+                                R.string.settings_check_existing_files_before_save_enabled_desc
+                            } else {
+                                R.string.settings_check_existing_files_before_save_disabled_desc
+                            }
+                        ),
+                        checked = uiState.checkExistingFilesBeforeSave,
+                        onCheckedChange = onCheckExistingFilesBeforeSaveChange
                     )
-
-                    MiuixSwitchWidget(
+                    "media_advanced" -> ArrowPreference(title = stringResource(R.string.settings_media_title), onClick = { openAdvanced(0) })
+                    "archive_advanced" -> ArrowPreference(title = stringResource(R.string.settings_archive_title), onClick = { openAdvanced(1) })
+                    "network_advanced" -> ArrowPreference(title = stringResource(R.string.settings_network_title), onClick = { openAdvanced(2) })
+                    "selective_download" -> MiuixSwitchWidget(
+                        title = stringResource(R.string.selective_download),
+                        description = stringResource(R.string.selective_download_desc),
+                        checked = uiState.selectiveDownload,
+                        onCheckedChange = onSelectiveDownloadChange
+                    )
+                    "media_card_info" -> OverlayDropdownMenu(
+                        title = stringResource(R.string.settings_media_card_info),
+                        summary = stringResource(if (uiState.showMediaResolution) R.string.settings_media_resolution else R.string.settings_media_file_size),
+                        entry = DropdownEntry(items = listOf(
+                            DropdownItem(text = stringResource(R.string.settings_media_file_size),
+                                selected = !uiState.showMediaResolution, onClick = { onShowMediaResolutionChange(false) }),
+                            DropdownItem(text = stringResource(R.string.settings_media_resolution),
+                                selected = uiState.showMediaResolution, onClick = { onShowMediaResolutionChange(true) }),
+                        )),
+                    )
+                    "debug_notifications" -> MiuixSwitchWidget(
                         title = stringResource(R.string.debug_notifications),
                         description = stringResource(R.string.debug_notifications_desc),
                         checked = uiState.debugNotificationEnabled,
                         onCheckedChange = onDebugNotificationChange
                     )
+                    "keep_screen_on" -> MiuixSwitchWidget(
+                        title = stringResource(R.string.keep_screen_on),
+                        description = stringResource(R.string.keep_screen_on_desc),
+                        checked = uiState.keepScreenOn,
+                        onCheckedChange = onKeepScreenOnChange
+                    )
                 }
             }
 
-            item {
+            item(key = "clipboard_title") {
                 SmallTitle(stringResource(R.string.clipboard))
             }
 
-            item {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp)
-                ) {
-                    MiuixSwitchWidget(
+            groupedCardItems(
+                items = clipboardRows,
+                key = { "clipboard_option_$it" }
+            ) { row ->
+                when (row) {
+                    "manual_input_links" -> MiuixSwitchWidget(
                         title = stringResource(R.string.manual_input_links),
                         description = stringResource(R.string.manual_input_links_desc),
                         checked = uiState.manualInputLinks,
                         onCheckedChange = onManualInputLinksChange
                     )
-
-                    if (!uiState.manualInputLinks) {
-                        MiuixSwitchWidget(
-                            title = stringResource(R.string.show_clipboard_bubble),
-                            description = stringResource(R.string.show_clipboard_bubble_desc),
-                            checked = uiState.showClipboardBubble,
-                            onCheckedChange = onShowClipboardBubbleChange
-                        )
-
-                        MiuixSwitchWidget(
-                            title = stringResource(R.string.auto_read_clipboard),
-                            description = stringResource(R.string.auto_read_clipboard_desc),
-                            checked = uiState.autoReadClipboard,
-                            onCheckedChange = onAutoReadClipboardChange
-                        )
-                    }
+                    "show_clipboard_bubble" -> MiuixSwitchWidget(
+                        title = stringResource(R.string.show_clipboard_bubble),
+                        description = stringResource(R.string.show_clipboard_bubble_desc),
+                        checked = uiState.showClipboardBubble,
+                        onCheckedChange = onShowClipboardBubbleChange
+                    )
+                    "auto_read_clipboard" -> MiuixSwitchWidget(
+                        title = stringResource(R.string.auto_read_clipboard),
+                        description = stringResource(R.string.auto_read_clipboard_desc),
+                        checked = uiState.autoReadClipboard,
+                        onCheckedChange = onAutoReadClipboardChange
+                    )
                 }
             }
 
-            item {
+            item(key = "file_naming_title") {
                 SmallTitle(stringResource(R.string.file_naming))
             }
 
-            item {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp)
-                ) {
-                    MiuixSwitchWidget(
-                        title = stringResource(R.string.enable_custom_naming),
-                        description = stringResource(R.string.enable_custom_naming_desc),
-                        checked = uiState.useCustomNaming,
-                        onCheckedChange = onUseCustomNamingChange
+            groupedCardItems(
+                items = listOf("custom_naming"),
+                key = { "file_naming_$it" }
+            ) {
+                MiuixSwitchWidget(
+                    title = stringResource(R.string.enable_custom_naming),
+                    description = stringResource(R.string.enable_custom_naming_desc),
+                    checked = uiState.useCustomNaming,
+                    onCheckedChange = onUseCustomNamingChange
+                )
+            }
+
+            if (uiState.useCustomNaming) {
+                item(key = "naming_template_field") {
+                    TextField(
+                        value = uiState.template,
+                        onValueChange = onTemplateChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 12.dp),
+                        label = stringResource(R.string.naming_template),
+                        enabled = true,
+                        singleLine = false,
+                        maxLines = 3,
+                        keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { }),
+                        trailingIcon = {
+                            ActionIconButton(
+                                imageVector = MiuixIcons.Refresh,
+                                contentDescription = stringResource(R.string.reset_template),
+                                onClick = onResetTemplate,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                        }
                     )
+                }
 
-                    if (uiState.useCustomNaming) {
-                        TextField(
-                            value = uiState.template,
-                            onValueChange = onTemplateChange,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            label = stringResource(R.string.naming_template),
-                            enabled = uiState.useCustomNaming,
-                            singleLine = false,
-                            maxLines = 3,
-                            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { }),
-                            trailingIcon = {
-                                if (uiState.useCustomNaming) {
-                                    Icon(
-                                        imageVector = MiuixIcons.Refresh,
-                                        contentDescription = stringResource(R.string.reset_template),
-                                        modifier = Modifier
-                                            .padding(end = 16.dp)
-                                            .size(20.dp)
-                                            .clickable { onResetTemplate() }
-                                    )
-                                }
+                item(key = "naming_placeholder_hint") {
+                    Text(
+                        text = stringResource(R.string.insert_placeholder_hint),
+                        modifier = Modifier.padding(
+                            start = 16.dp,
+                            end = 12.dp,
+                            bottom = 8.dp
+                        ),
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    )
+                }
+
+                item(key = "naming_token_grid") {
+                    TokenGrid(
+                        tokens = uiState.tokens,
+                        enabled = true,
+                        onInsert = { placeholder ->
+                            val current = uiState.template
+                            val selectionStart = current.selection.start.coerceAtLeast(0)
+                            val selectionEnd = current.selection.end.coerceAtLeast(0)
+                            val min = minOf(selectionStart, selectionEnd)
+                            val max = maxOf(selectionStart, selectionEnd)
+                            val newText = buildString {
+                                append(current.text.substring(0, min))
+                                append(placeholder)
+                                append(current.text.substring(max))
                             }
-                        )
-
-                        Text(
-                            text = stringResource(R.string.insert_placeholder_hint),
-                            modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            fontSize = 14.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        )
-
-                        TokenGrid(
-                            tokens = uiState.tokens,
-                            enabled = uiState.useCustomNaming,
-                            onInsert = { placeholder ->
-                                val current = uiState.template
-                                val selectionStart = current.selection.start.coerceAtLeast(0)
-                                val selectionEnd = current.selection.end.coerceAtLeast(0)
-                                val min = minOf(selectionStart, selectionEnd)
-                                val max = maxOf(selectionStart, selectionEnd)
-                                val newText = buildString {
-                                    append(current.text.substring(0, min))
-                                    append(placeholder)
-                                    append(current.text.substring(max))
-                                }
-                                val newSelection = min + placeholder.length
-                                onTemplateChange(
-                                    TextFieldValue(
-                                        text = newText,
-                                        selection = androidx.compose.ui.text.TextRange(newSelection)
-                                    )
+                            val newSelection = min + placeholder.length
+                            onTemplateChange(
+                                TextFieldValue(
+                                    text = newText,
+                                    selection = androidx.compose.ui.text.TextRange(newSelection)
                                 )
-                            }
-                        )
-                    }
+                            )
+                        }
+                    )
                 }
             }
 
-            item {
+            item(key = "about_title") {
                 SmallTitle(stringResource(R.string.about))
             }
 
-            item {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp)
-                ) {
-                    BasicComponent(
+            groupedCardItems(
+                items = listOf("version", "check_updates", "github"),
+                key = { "about_$it" }
+            ) { row ->
+                when (row) {
+                    "version" -> BasicComponent(
                         title = stringResource(R.string.version),
-                        summary = stringResource(R.string.version_with_prefix, BuildConfig.VERSION_NAME),
-                        onClick = { /* No action */ }
+                        summary = stringResource(
+                            R.string.version_with_prefix,
+                            BuildConfig.VERSION_NAME
+                        ),
+                        onClick = { }
                     )
-                    BasicComponent(
+                    "check_updates" -> BasicComponent(
+                        title = stringResource(R.string.settings_check_updates),
+                        summary = stringResource(if (updateState.isChecking) R.string.update_checking else R.string.update_check_hint),
+                        onClick = updateChecker::checkManually,
+                        endActions = {
+                            ActionIconButton(MiuixIcons.Regular.Refresh, stringResource(R.string.settings_check_updates), updateChecker::checkManually)
+                        }
+                    )
+                    "github" -> BasicComponent(
                         title = stringResource(R.string.visit_github),
-                        titleColor = BasicComponentDefaults.titleColor(color = MiuixTheme.colorScheme.primary),
+                        titleColor = BasicComponentDefaults.titleColor(
+                            color = MiuixTheme.colorScheme.primary
+                        ),
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/NEORUAA/XHS_Downloader_Android"))
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/NEORUAA/XHS_Downloader_Android")
+                            )
                             context.startActivity(intent)
-                        },
+                        }
                     )
                 }
+            }
+
+            item(key = "settings_bottom_spacer") {
+                Spacer(
+                    modifier = Modifier
+                        .height(24.dp)
+                        .navigationBarsPadding()
+                )
             }
         }
     }
@@ -520,7 +1090,7 @@ private fun TokenGrid(
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.padding(top = 0.dp, start = 16.dp, end = 12.dp, bottom = 16.dp)
+        modifier = Modifier.padding(top = 0.dp, start = 12.dp, end = 12.dp, bottom = 16.dp)
     ) {
         tokens.forEach { token ->
             TokenChip(
@@ -543,13 +1113,16 @@ private fun TokenChip(
 ) {
     val borderColor = MiuixTheme.colorScheme.surface
     Card(
-        modifier = modifier
-            .border(width = 1.dp, color = borderColor, shape = ContinuousRoundedRectangle(16.dp))
-            .then(if (enabled) Modifier.clickable { onInsert(token.placeholder) } else Modifier),
-        cornerRadius = 14.dp,
+        modifier = modifier,
+        cornerRadius = 16.dp,
         colors = CardDefaults.defaultColors(
             color = if (enabled) MiuixTheme.colorScheme.surfaceVariant else MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
+        ),
+        onClick = if (enabled) {
+            { onInsert(token.placeholder) }
+        } else {
+            null
+        }
     ) {
         Column(
             modifier = Modifier

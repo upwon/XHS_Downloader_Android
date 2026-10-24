@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -47,14 +48,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.neoruaa.xhsdn.ui.AdaptiveTopAppBar
+import com.neoruaa.xhsdn.ui.TopAppBarIconButton
+import com.neoruaa.xhsdn.ui.DetailMediaWaterfall
+import com.neoruaa.xhsdn.ui.miuixBackdropSource
+import com.neoruaa.xhsdn.ui.miuixVerticalScrollEffects
+import com.neoruaa.xhsdn.ui.rememberMiuixTopBarBackdrop
+import com.neoruaa.xhsdn.ui.rememberWindowLayoutInfo
+import com.neoruaa.xhsdn.ui.navigation.AppRoute
 import com.neoruaa.xhsdn.viewmodels.DetailViewModel
-import com.kyant.capsule.ContinuousRoundedRectangle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -86,6 +97,13 @@ import com.neoruaa.xhsdn.viewmodels.MediaType
 import com.neoruaa.xhsdn.utils.detectMediaType
 import com.neoruaa.xhsdn.utils.decodeSampledBitmap
 import com.neoruaa.xhsdn.utils.createVideoThumbnail
+import com.neoruaa.xhsdn.utils.deleteStoredMedia
+import com.neoruaa.xhsdn.utils.storedMediaExists
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.Lifecycle
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flowOf
 import top.yukonga.miuix.kmp.window.WindowDialog
 import top.yukonga.miuix.kmp.window.WindowListPopup
 import top.yukonga.miuix.kmp.icon.extended.Info
@@ -97,12 +115,16 @@ import com.neoruaa.xhsdn.ui.rememberOffsetPopupPositionProvider
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 
 data class DetailUiState(
     val mediaItems: List<MediaItem> = emptyList(),
     val taskTitle: String = "",
     val isDownloading: Boolean = false,
-    val noteContent: String? = null
+    val noteContent: String? = null,
+    val downloadCards: List<com.neoruaa.xhsdn.feature.detail.DetailMediaCard> = emptyList(),
+    val taskId: Long? = null,
 )
 
 class DetailActivity : ComponentActivity() {
@@ -131,6 +153,7 @@ class DetailActivity : ComponentActivity() {
     private val viewModel: DetailViewModel by lazy {
         ViewModelProvider(this)[DetailViewModel::class.java]
     }
+    private var taskId: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -157,16 +180,22 @@ class DetailActivity : ComponentActivity() {
         WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightNavigationBars = !isNightMode
 
         // 获取传递的数据
-        val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: "0" // 默认值
-        val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE) ?: "详情"
         val filePaths = intent.getStringArrayListExtra(EXTRA_FILE_PATHS) ?: arrayListOf()
+        taskId = intent.getStringExtra(EXTRA_TASK_ID)?.toLongOrNull()
         val noteContent = intent.getStringExtra(EXTRA_NOTE_CONTENT)
         val noteUrl = intent.getStringExtra(EXTRA_NOTE_URL) // Get the note URL
 
         // 构建媒体项列表
-        val mediaItems = filePaths.map { path ->
-            MediaItem(path, detectMediaType(path))
-        }
+        val mediaItems = filePaths.map { path -> MediaItem(path, detectMediaType(path)) }
+        taskId?.let { id -> lifecycleScope.launch {
+            val container = (application as XHSApplication).appContainer
+            container.initialization.await()
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                container.taskRepository.observeTask(id).collect { task ->
+                    task?.let { viewModel.updateState(DetailUiState(it.mediaRefs.map(::MediaItem), getString(R.string.download_detail_title), it.isActive, it.noteContent)) }
+                }
+            }
+        } }
 
         // 更新UI状态
         viewModel.updateState(
@@ -182,17 +211,25 @@ class DetailActivity : ComponentActivity() {
             val controller = ThemeController(ColorSchemeMode.System)
             val uiState by viewModel.state.collectAsStateWithLifecycle()
             val topBarState = rememberTopAppBarState()
+            val container = (application as XHSApplication).appContainer
+            val cards by remember(taskId) {
+                taskId?.let { com.neoruaa.xhsdn.feature.detail.observeDetailMediaCards(container.taskRepository, container.taskDatabase.downloadSessionDao(), it) }
+                    ?: flowOf(emptyList())
+            }.collectAsStateWithLifecycle(initialValue = emptyList())
             MiuixTheme(controller = controller) {
                 DetailScreen(
-                    uiState = uiState,
+                    uiState = uiState.copy(downloadCards = cards, taskId = taskId),
                     onBack = { finish() },
                     onMediaClick = { openFile(it) },
                     onDeleteMedia = { mediaItem ->
-                        // 从UI状态中移除该项目
-                        viewModel.removeMediaItem(mediaItem)
+                        if (deleteStoredMedia(mediaItem.media)) {
+                            taskId?.let { id -> lifecycleScope.launch { (application as XHSApplication).appContainer.taskRepository.removeMediaRef(id, mediaItem.path) } }
+                            viewModel.removeMediaItem(mediaItem)
+                        } else {
+                            showToast(getString(R.string.delete_file_failed, mediaItem.media.displayName))
+                        }
                     },
                     onCopyUrl = {
-                        // Copy URL to clipboard directly in DetailActivity
                         if (!noteUrl.isNullOrEmpty()) {
                             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("xhs_url", noteUrl))
@@ -200,19 +237,15 @@ class DetailActivity : ComponentActivity() {
                         }
                     },
                     onWebCrawl = {
-                        // Launch web crawl directly - task will be created in WebViewActivity when user clicks "爬取"
                         if (!noteUrl.isNullOrEmpty()) {
                             val cleanUrl = com.neoruaa.xhsdn.utils.UrlUtils.extractFirstUrl(noteUrl)
                             if (cleanUrl != null) {
-                                // Launch WebViewActivity for the web crawl
-                                val webViewIntent = Intent(this, WebViewActivity::class.java).apply {
-                                    putExtra("url", cleanUrl)
-                                    // Don't pass task_id here - let WebViewActivity create the task when user clicks "爬取"
-                                }
-                                // Start WebViewActivity for result - DetailActivity will receive the result
-                                // and then finish, allowing MainActivity's onActivityResult to eventually handle it
-                                startActivityForResult(webViewIntent, MainActivity.WEBVIEW_REQUEST_CODE)
-                                finish() // Close DetailActivity and return to MainActivity
+                                startActivity(
+                                    Intent(this, WebViewActivity::class.java).apply {
+                                        putExtra("url", cleanUrl)
+                                    }
+                                )
+                                finish()
                             } else {
                                 Toast.makeText(this, R.string.no_valid_link_found, Toast.LENGTH_SHORT).show()
                             }
@@ -225,19 +258,21 @@ class DetailActivity : ComponentActivity() {
     }
 
     private fun openFile(item: MediaItem) {
-        val file = File(item.path)
-        if (!file.exists()) {
+        if (!storedMediaExists(item.media)) {
             showToast(getString(R.string.file_does_not_exist, item.path))
             return
         }
-        val mimeType = when (item.type) {
+        val mimeType = item.media.mimeType.takeUnless { it == "application/octet-stream" } ?: when (item.type) {
             MediaType.VIDEO -> "video/*"
             MediaType.IMAGE -> "image/*"
             MediaType.OTHER -> "*/*"
         }
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val uri = item.media.legacyPath?.let { path ->
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", File(path))
+        } ?: item.media.androidUri
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeType)
+            clipData = ClipData.newRawUri(item.media.displayName, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         kotlin.runCatching { startActivity(intent) }.onFailure {
@@ -252,6 +287,108 @@ class DetailActivity : ComponentActivity() {
 }
 
 @Composable
+internal fun DetailRoute(
+    route: AppRoute.Detail,
+    onBack: () -> Unit,
+    onOpenWebView: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val detailTitle = stringResource(R.string.download_detail_title)
+    val taskId = remember(route.taskId) { route.taskId.toLongOrNull() }
+    val repository = remember(context) { (context.applicationContext as XHSApplication).appContainer.taskRepository }
+    val task by remember(taskId) { taskId?.let(repository::observeTask) ?: flowOf(null) }.collectAsStateWithLifecycle(initialValue = null)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val initialMediaItems = remember(route) { route.filePaths.map { path -> MediaItem(path, detectMediaType(path)) } }
+    var uiState by remember(route) {
+        mutableStateOf(
+            DetailUiState(
+                mediaItems = initialMediaItems,
+                taskTitle = detailTitle,
+                isDownloading = false,
+                noteContent = route.noteContent
+            )
+        )
+    }
+    androidx.compose.runtime.LaunchedEffect(task) {
+        task?.let { uiState = uiState.copy(mediaItems = it.mediaRefs.map(::MediaItem), isDownloading = it.isActive, noteContent = it.noteContent) }
+    }
+    val topBarState = rememberTopAppBarState()
+    val container = remember(context) { (context.applicationContext as XHSApplication).appContainer }
+    val cards by remember(taskId) {
+        taskId?.let { com.neoruaa.xhsdn.feature.detail.observeDetailMediaCards(repository, container.taskDatabase.downloadSessionDao(), it) }
+            ?: flowOf(emptyList())
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    DetailScreen(
+        uiState = uiState.copy(downloadCards = cards, taskId = taskId),
+        onBack = onBack,
+        onMediaClick = { item -> openRouteMedia(context, item) },
+        onDeleteMedia = { mediaItem ->
+            if (context.deleteStoredMedia(mediaItem.media)) {
+                taskId?.let { id -> scope.launch { repository.removeMediaRef(id, mediaItem.path) } }
+                uiState = uiState.copy(
+                    mediaItems = uiState.mediaItems.filter { it.path != mediaItem.path }
+                )
+            } else {
+                Toast.makeText(
+                    context,
+                    resources.getString(R.string.delete_file_failed, mediaItem.media.displayName),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        },
+        onCopyUrl = {
+            route.noteUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("xhs_url", url))
+                Toast.makeText(context, R.string.link_copied, Toast.LENGTH_SHORT).show()
+            }
+        },
+        onWebCrawl = {
+            val cleanUrl = route.noteUrl?.let(com.neoruaa.xhsdn.utils.UrlUtils::extractFirstUrl)
+            if (cleanUrl != null) {
+                onOpenWebView(cleanUrl)
+            } else {
+                Toast.makeText(context, R.string.no_valid_link_found, Toast.LENGTH_SHORT).show()
+            }
+        },
+        topBarState = topBarState
+    )
+}
+
+private fun openRouteMedia(context: Context, item: MediaItem) {
+    if (!context.storedMediaExists(item.media)) {
+        Toast.makeText(
+            context,
+            context.getString(R.string.file_does_not_exist, item.path),
+            Toast.LENGTH_SHORT
+        ).show()
+        return
+    }
+    val mimeType = item.media.mimeType.takeUnless { it == "application/octet-stream" } ?: when (item.type) {
+        MediaType.VIDEO -> "video/*"
+        MediaType.IMAGE -> "image/*"
+        MediaType.OTHER -> "*/*"
+    }
+    val uri = item.media.legacyPath?.let { path ->
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(path))
+    } ?: item.media.androidUri
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mimeType)
+        clipData = ClipData.newRawUri(item.media.displayName, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(intent) }.onFailure {
+        Toast.makeText(
+            context,
+            context.getString(R.string.unable_to_open_file_error, it.message),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+@Composable
 private fun DetailScreen(
     uiState: DetailUiState,
     onBack: () -> Unit,
@@ -261,36 +398,44 @@ private fun DetailScreen(
     onWebCrawl: () -> Unit,
     topBarState: TopAppBarState
 ) {
+    var previewPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val images = remember(uiState.mediaItems, uiState.downloadCards) {
+        (uiState.downloadCards.mapNotNull { it.stored } + uiState.mediaItems)
+            .filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
+    }
     val scrollBehavior = MiuixScrollBehavior(state = topBarState)
+    val windowLayoutInfo = rememberWindowLayoutInfo()
+    val topBarBackdrop = rememberMiuixTopBarBackdrop()
 
     // Actions menu state
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout),
-        topBar = {
-            TopAppBar(
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout),
+            topBar = {
+            AdaptiveTopAppBar(
                 title = uiState.taskTitle,
+                isWideScreen = windowLayoutInfo.isWideScreen,
+                backdrop = topBarBackdrop,
                 navigationIcon = {
-                    Icon(
+                    TopAppBarIconButton(
                         imageVector = MiuixIcons.Back,
                         contentDescription = stringResource(R.string.back_content_description),
+                        onClick = onBack,
                         modifier = Modifier
-                            .padding(start = 12.dp)
-                            .clickable { onBack() }
+                            .padding(start = 4.dp)
                     )
                 },
                 actions = {
                     Box(
-                        modifier = Modifier
-                                .padding(end = 12.dp)
-                                .clickable { menuExpanded = true },
+                        modifier = Modifier.padding(end = 4.dp),
                             contentAlignment = Alignment.Center
                     ) {
-                        Icon(
+                        TopAppBarIconButton(
                             imageVector = MiuixIcons.MoreCircle,
                             contentDescription = stringResource(R.string.more_options),
-                            modifier = Modifier.size(24.dp)
+                            onClick = { menuExpanded = true }
                         )
 
                         val menuItems = listOf(
@@ -327,17 +472,43 @@ private fun DetailScreen(
                 },
                 scrollBehavior = scrollBehavior
             )
+            }
+        ) { padding ->
+            FilesPage(
+                uiState = uiState,
+                onMediaClick = { item ->
+                    if (item.type == MediaType.IMAGE) previewPath = item.path else onMediaClick(item)
+                },
+                onDeleteMedia = onDeleteMedia,
+                topPadding = padding.calculateTopPadding(),
+                contentStartPadding = windowLayoutInfo.contentStartPadding,
+                contentEndPadding = windowLayoutInfo.contentEndPadding,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .miuixBackdropSource(topBarBackdrop)
+                    .miuixVerticalScrollEffects()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+            )
         }
-    ) { padding ->
-        FilesPage(
-            uiState = uiState,
-            onMediaClick = onMediaClick,
-            onDeleteMedia = onDeleteMedia,
-            modifier = Modifier
-                .fillMaxSize()
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
-                .padding(padding)
-        )
+        previewPath?.let { path ->
+            if (images.any { it.path == path }) {
+                Dialog(
+                    onDismissRequest = { previewPath = null },
+                    properties = DialogProperties(
+                        dismissOnClickOutside = false,
+                        usePlatformDefaultWidth = false,
+                        decorFitsSystemWindows = false
+                    )
+                ) {
+                    com.neoruaa.xhsdn.ui.StoredImageViewer(
+                        modifier = Modifier.fillMaxSize(),
+                        images = images,
+                        initialPath = path,
+                        onDismiss = { previewPath = null }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -346,34 +517,39 @@ private fun FilesPage(
     uiState: DetailUiState,
     onMediaClick: (MediaItem) -> Unit,
     onDeleteMedia: (MediaItem) -> Unit,
+    topPadding: androidx.compose.ui.unit.Dp,
+    contentStartPadding: androidx.compose.ui.unit.Dp,
+    contentEndPadding: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier
 ) {
-    val navPadding = WindowInsets.navigationBars
-        .asPaddingValues()
-        .calculateBottomPadding()
-
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         verticalItemSpacing = 10.dp,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(
-            top = 16.dp,
-            start = 16.dp,
-            end = 16.dp,
-            bottom = 20.dp + navPadding
+            top = topPadding,
+            start = contentStartPadding + 12.dp,
+            end = contentEndPadding + 12.dp
         ),
-        modifier = modifier
+        modifier = modifier,
+        overscrollEffect = null
     ) {
 
         // ===== 笔记文案（单列 / 满行）=====
         if (uiState.noteContent != null) {
-            item(span = StaggeredGridItemSpan.FullLine) {
+            item(
+                key = "note_content_title",
+                span = StaggeredGridItemSpan.FullLine
+            ) {
                 SmallTitle(
                     text = stringResource(R.string.notes_content_title),
-                    insideMargin = PaddingValues(12.dp, 0.dp)
+                    insideMargin = PaddingValues(start = 12.dp, top = 8.dp)
                 )
             }
-            item(span = StaggeredGridItemSpan.FullLine) {
+            item(
+                key = "note_content",
+                span = StaggeredGridItemSpan.FullLine
+            ) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -401,21 +577,29 @@ private fun FilesPage(
         }
 
         // ===== 已下载文件标题（单列 / 满行）=====
-        item(span = StaggeredGridItemSpan.FullLine) {
+        item(
+            key = "downloaded_files_title",
+            span = StaggeredGridItemSpan.FullLine
+        ) {
             SmallTitle(
-                text = stringResource(R.string.downloaded_files_title_lower),
+                text = stringResource(if (uiState.downloadCards.any { it.stored == null }) R.string.detail_media_files else R.string.downloaded_files_title_lower),
                 insideMargin = PaddingValues(12.dp, 0.dp)
             )
         }
 
         // ===== 空态（单列 / 满行）=====
-        if (uiState.mediaItems.isEmpty()) {
-            item(span = StaggeredGridItemSpan.FullLine) {
+        if (uiState.mediaItems.isEmpty() && uiState.downloadCards.isEmpty()) {
+            item(
+                key = "downloaded_files_empty",
+                span = StaggeredGridItemSpan.FullLine
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(ContinuousRoundedRectangle(18.dp))
-                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .squircleBackground(
+                            color = MiuixTheme.colorScheme.surfaceVariant,
+                            cornerRadius = 18.dp
+                        )
                 ) {
                     Text(
                         text = stringResource(R.string.no_downloaded_files),
@@ -424,13 +608,29 @@ private fun FilesPage(
                 }
             }
         } else {
-            item(span = StaggeredGridItemSpan.FullLine) {
-                MediaWaterfall(
+            item(
+                key = "downloaded_files",
+                span = StaggeredGridItemSpan.FullLine
+            ) {
+                DetailMediaWaterfall(
                     mediaItems = uiState.mediaItems,
                     onMediaClick = onMediaClick,
-                    onDeleteMedia = onDeleteMedia
+                    onDeleteMedia = onDeleteMedia,
+                    cards = uiState.downloadCards,
+                    taskId = uiState.taskId,
                 )
             }
+        }
+
+        item(
+            key = "detail_bottom_spacer",
+            span = StaggeredGridItemSpan.FullLine
+        ) {
+            Spacer(
+                modifier = Modifier
+                    .height(24.dp)
+                    .navigationBarsPadding()
+            )
         }
     }
 }
@@ -546,6 +746,7 @@ private fun estimateMediaCardHeight(item: MediaItem): Float {
 @Composable
 private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaItem) -> Unit) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleteAfterDismiss by remember { mutableStateOf(false) }
     val bitmap = rememberThumbnail(item)
     val aspectRatio = rememberAspectRatio(item) ?: 0.75f
     val fileName = remember(item.path) { File(item.path).name }
@@ -553,8 +754,10 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
 
     Column(
         modifier = Modifier
-            .clip(ContinuousRoundedRectangle(18.dp))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .squircleSurface(
+                color = MiuixTheme.colorScheme.surfaceVariant,
+                cornerRadius = 18.dp
+            )
             .clickable { onClick() }
     ) {
         Box(
@@ -630,38 +833,41 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
         }
     }
 
-    if (showDeleteDialog) {
-        WindowDialog(
-            title = stringResource(R.string.delete_file_dialog_title),
-            summary = stringResource(R.string.delete_file_dialog_message, fileName),
-            show = true,
-            onDismissRequest = { showDeleteDialog = false }
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.padding(top = 8.dp)
-            ) {
-                TextButton(
-                    text = stringResource(R.string.cancel),
-                    onClick = { showDeleteDialog = false },
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(12.dp))
-                TextButton(
-                    text = stringResource(R.string.apply),
-                    onClick = {
-                        // 删除文件
-                        val file = File(item.path)
-                        if (file.exists()) {
-                            file.delete()
-                        }
-                        onDelete(item) // 调用删除回调
-                        showDeleteDialog = false
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
+    WindowDialog(
+        title = stringResource(R.string.delete_file_dialog_title),
+        summary = stringResource(R.string.delete_file_dialog_message, fileName),
+        show = showDeleteDialog,
+        onDismissRequest = { showDeleteDialog = false },
+        onDismissFinished = {
+            if (deleteAfterDismiss) {
+                deleteAfterDismiss = false
+                val file = File(item.path)
+                if (file.exists()) {
+                    file.delete()
+                }
+                onDelete(item)
             }
+        }
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            TextButton(
+                text = stringResource(R.string.cancel),
+                onClick = { showDeleteDialog = false },
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(12.dp))
+            TextButton(
+                text = stringResource(R.string.apply),
+                onClick = {
+                    deleteAfterDismiss = true
+                    showDeleteDialog = false
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
         }
     }
 }
@@ -681,7 +887,7 @@ private fun PlaceholderMedia(
             imageVector = if (type == MediaType.VIDEO) MiuixIcons.Play else MiuixIcons.Info,
             contentDescription = null,
             modifier = Modifier.size(36.dp),
-            tint = Color.Gray
+            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary
         )
     }
 }

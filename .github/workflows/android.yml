@@ -1,0 +1,76 @@
+name: Android APK
+on:
+  push:
+    branches: [main, 'codex/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Enable KVM for the runner
+        run: |
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Exercise downloaded image preview on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          disable-linux-hw-accel: false
+          api-level: 34
+          arch: x86_64
+          profile: pixel_7_pro
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
+      - name: Preserve image preview test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-preview-test-results-${{ github.run_id }}
+          path: |
+            app/build/reports/androidTests/connected/debug
+            app/build/outputs/androidTest-results/connected/debug
+          if-no-files-found: ignore
+      - name: Configure signing
+        id: signing
+        env:
+          SIGNING_KEY: ${{ secrets.BASE_64_SIGNING_KEY }}
+          SIGNING_PROPERTIES: ${{ secrets.LOCAL_PROPERTIES }}
+        shell: bash
+        run: |
+          if [[ -n "$SIGNING_KEY" && -n "$SIGNING_PROPERTIES" ]]; then
+            umask 077
+            printf '%s' "$SIGNING_KEY" | base64 --decode > app/release_keystore.jks
+            printf '%s\n' "$SIGNING_PROPERTIES" > keystore.properties
+            printf '\nstoreFile=app/release_keystore.jks\n' >> keystore.properties
+            echo 'task=assembleRelease' >> "$GITHUB_OUTPUT"
+            echo 'variant=release' >> "$GITHUB_OUTPUT"
+          else
+            echo '::notice::Signing secrets unavailable; building a debug-signed test APK.'
+            echo 'task=assembleDebug' >> "$GITHUB_OUTPUT"
+            echo 'variant=debug' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate and build
+        env:
+          BUILD_TASK: ${{ steps.signing.outputs.task }}
+        run: bash ./gradlew :app:testDebugUnitTest :app:lintDebug ":app:$BUILD_TASK" --no-daemon
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-upwon-${{ steps.signing.outputs.variant }}-${{ github.sha }}
+          path: app/build/outputs/apk/${{ steps.signing.outputs.variant }}/*.apk
+          if-no-files-found: error
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/release_keystore.jks keystore.properties
