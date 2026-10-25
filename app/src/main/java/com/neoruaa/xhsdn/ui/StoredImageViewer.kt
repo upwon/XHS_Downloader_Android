@@ -43,6 +43,7 @@ fun StoredImageViewer(
     images: List<MediaItem>,
     initialPath: String,
     onDismiss: () -> Unit,
+    companions: List<MediaItem> = images,
 ) {
     if (images.isEmpty()) return
     val pager = rememberPagerState(
@@ -62,7 +63,7 @@ fun StoredImageViewer(
                 key = { images[it].path },
                 modifier = Modifier.fillMaxWidth().weight(1f)
             ) { page ->
-                StoredImagePage(item = images[page], modifier = Modifier.fillMaxSize())
+                StoredImagePage(item = images[page], companions = companions, active = pager.currentPage == page, modifier = Modifier.fillMaxSize())
             }
         }
     }
@@ -71,7 +72,7 @@ fun StoredImageViewer(
 private data class ImageLoad(val bitmap: ImageBitmap? = null, val complete: Boolean = false)
 
 @Composable
-private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem) {
+private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem, companions: List<MediaItem>, active: Boolean) {
     val context = LocalContext.current.applicationContext
     val image by produceState(ImageLoad(), item.media) {
         value = ImageLoad()
@@ -88,9 +89,18 @@ private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem) {
             motionFile?.delete()
         }
     }
-    LaunchedEffect(item.path) {
-        motionFile = withContext(Dispatchers.IO) { extractMotionVideo(context, item) }
+    LaunchedEffect(item.path, companions) {
+        var extracted: java.io.File? = null
+        try {
+            withContext(Dispatchers.IO) { extracted = extractMotionVideo(context, item, companions) }
+            motionFile = extracted
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            motionFile = null
+            extracted?.delete()
+        }
     }
+    LaunchedEffect(active) { if (!active) playing = false }
     var scale by remember(item.path) { mutableFloatStateOf(1f) }
     var offset by remember(item.path) { mutableStateOf(Offset.Zero) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -120,7 +130,7 @@ private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem) {
             })
         }, contentAlignment = Alignment.Center) {
         val bitmap = image.bitmap
-        if (playing && motionFile != null) {
+        if (active && playing && motionFile != null) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewContext ->
