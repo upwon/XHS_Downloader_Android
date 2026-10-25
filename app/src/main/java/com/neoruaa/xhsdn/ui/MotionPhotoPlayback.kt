@@ -3,18 +3,25 @@ package com.neoruaa.xhsdn.ui
 import android.content.Context
 import android.media.MediaExtractor
 import com.neoruaa.xhsdn.viewmodels.MediaItem
+import com.neoruaa.xhsdn.viewmodels.MediaType
 import java.io.File
 import java.io.RandomAccessFile
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
 /** Extracts the appended MP4 in the merged motion-photo formats produced by this app. */
-internal suspend fun extractMotionVideo(context: Context, item: MediaItem): File? {
+internal suspend fun extractMotionVideo(context: Context, item: MediaItem, companions: List<MediaItem> = emptyList()): File? {
+    val stem = item.media.displayName.substringBeforeLast('.').removeSuffix("_live_MP")
+    val paired = companions.firstOrNull {
+        it.type == MediaType.VIDEO && it.media.displayName.substringBeforeLast('.') in
+            setOf("${stem}_motion", "${stem}_live_MP")
+    }
+    val sourceItem = paired ?: item
     val source = File.createTempFile("motion-source-", ".jpg", context.cacheDir)
     var output: File? = null
     try {
-        val input = item.media.legacyPath?.let { File(it).inputStream() }
-            ?: context.contentResolver.openInputStream(item.media.androidUri) ?: return null
+        val input = sourceItem.media.legacyPath?.let { File(it).inputStream() }
+            ?: context.contentResolver.openInputStream(sourceItem.media.androidUri) ?: return null
         input.use { stream -> source.outputStream().use { target ->
             val buffer = ByteArray(65536)
             while (true) {
@@ -64,6 +71,10 @@ internal suspend fun extractMotionVideo(context: Context, item: MediaItem): File
                 base += count - 7
             }
         }
+        return null
+    } catch (_: java.io.IOException) {
+        return null
+    } catch (_: SecurityException) {
         return null
     } finally {
         source.delete()
