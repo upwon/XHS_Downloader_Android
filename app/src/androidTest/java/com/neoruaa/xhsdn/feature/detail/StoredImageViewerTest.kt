@@ -53,6 +53,41 @@ class StoredImageViewerTest {
         }
     }
 
+    @Test fun homeThumbnailOpensPreviewAndPagerSwipesBothDirections() {
+        val directory = File(app.cacheDir, "detail-viewer-test-${System.nanoTime()}").apply { mkdirs() }
+        val files = (0..2).map { index ->
+            val file = File(directory, "image-$index.png")
+            val bitmap = Bitmap.createBitmap(80, 120, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(android.graphics.Color.rgb(index * 80, 100, 150))
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+            file
+        }
+        val taskId = System.currentTimeMillis()
+        kotlinx.coroutines.runBlocking {
+            app.appContainer.taskRepository.insertTask(com.neoruaa.xhsdn.data.DownloadTask(
+                id = taskId, noteUrl = "https://www.xiaohongshu.com/explore/test",
+                noteTitle = "Home preview test", noteType = com.neoruaa.xhsdn.data.NoteType.IMAGE,
+                totalFiles = 3, completedFiles = 3, status = com.neoruaa.xhsdn.data.TaskStatus.COMPLETED,
+                createdAt = taskId, mediaRefs = files.map { com.neoruaa.xhsdn.data.storage.StoredMediaRef.fromLegacyFile(it, "image/png") }
+            ))
+        }
+        val scenario = ActivityScenario.launch(com.neoruaa.xhsdn.MainActivity::class.java)
+        try {
+            clickDescription(files[1].name)
+            awaitText(app.getString(R.string.detail_image_position, 2, 3))
+            awaitDescription(files[1].name)
+            swipe(forward = true)
+            awaitText(app.getString(R.string.detail_image_position, 3, 3))
+            awaitDescription(files[2].name)
+            swipe(forward = false)
+            awaitText(app.getString(R.string.detail_image_position, 2, 3))
+        } finally {
+            scenario.close()
+            directory.deleteRecursively()
+        }
+    }
+
     private fun clickDescription(description: String) {
         val deadline = SystemClock.uptimeMillis() + 8000
         while (SystemClock.uptimeMillis() < deadline) {
