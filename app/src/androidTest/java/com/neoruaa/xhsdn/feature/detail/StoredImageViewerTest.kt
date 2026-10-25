@@ -93,7 +93,7 @@ class StoredImageViewerTest {
         }
     }
 
-    @Test fun mergedAndSeparateLivePhotosContainPlayableVideo() = kotlinx.coroutines.runBlocking {
+    @Test fun mergedAndSeparateLivePhotosContainPlayableVideo(): Unit = kotlinx.coroutines.runBlocking {
         val directory = File(app.cacheDir, "motion-test").apply { mkdirs() }
         try {
             val still = File(directory, "photo.jpg")
