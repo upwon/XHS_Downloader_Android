@@ -73,6 +73,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -1162,7 +1164,8 @@ private fun HistoryPage(
             )
         ) {
             com.neoruaa.xhsdn.ui.StoredImageViewer(
-                images = images,
+                images = images.filter { it.type == MediaType.IMAGE },
+                companions = images,
                 initialPath = initialPath,
                 onDismiss = { homePreview = null }
             )
@@ -1384,7 +1387,7 @@ private fun HistoryPage(
                                         if (item.type == MediaType.IMAGE) {
                                             val images = ((if (task.mediaRefs.isNotEmpty()) task.mediaRefs.map(::MediaItem)
                                                 else if (task.status == TaskStatus.DOWNLOADING) uiState.mediaItems
-                                                else emptyList()) + item).filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
+                                                else emptyList()) + item).distinctBy { it.path }
                                             homePreview = images to item.path
                                         } else {
                                             onMediaClick(item)
@@ -1946,6 +1949,7 @@ private fun TaskCell(
                                 color = MiuixTheme.colorScheme.surface,
                                 cornerRadius = 8.dp
                             )
+                            .semantics { contentDescription = item.media.displayName }
                             .clickable { onMediaClick(item) }
                     ) {
                         val bitmap = rememberThumbnail(item)
