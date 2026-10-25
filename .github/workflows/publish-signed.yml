@@ -1,7 +1,7 @@
 name: Publish verified signed Red Potato Downloader APK
 on:
   push:
-    branches: ['release/publish-v1.4.4']
+    branches: ['release/publish-v1.4.5']
     paths: ['.github/workflows/publish-signed.yml']
   workflow_dispatch:
 permissions:
@@ -23,20 +23,20 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           repository: upwon/AniCh
-          run-id: 40064744482
-          artifact-ids: '12548957278'
+          run-id: 40214971986
+          artifact-ids: '12607093591'
           github-token: ${{ github.token }}
           path: dist
       - name: Verify source, APK checksum and signing certificate
         shell: bash
         run: |
           set -euo pipefail
-          APK=$(find dist -name xhs-upwon-1.4.4-release.apk -type f)
+          APK=$(find dist -name xhs-upwon-1.4.5-release.apk -type f)
           test -n "$APK"
           DIRECTORY=$(dirname "$APK")
           echo "ASSET_DIR=$DIRECTORY" >> "$GITHUB_ENV"
-          test "$(cat "$DIRECTORY/SOURCE_COMMIT.txt")" = '0e8669a91c0d11df57ab68293ab6819d27df40da'
-          test "$(sha256sum "$APK" | cut -d ' ' -f1)" = 'b86a0ab8160c137a1ddccad32f3672a661a01efd50ef5a46836d6968e3d6bba4'
+          test "$(cat "$DIRECTORY/SOURCE_COMMIT.txt")" = '55ea586cb2186202458b17c0bd2b5159e8f95602'
+          test "$(sha256sum "$APK" | cut -d ' ' -f1)" = '3dac560119c18cb52a7014109d0e5c413f0f62474c9f1d6ca031b7165bdae239'
           (cd "$DIRECTORY" && sha256sum --check SHA256SUMS.txt)
           BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" > /tmp/xhs-certificate.txt
@@ -48,32 +48,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v1.4.4 >/dev/null 2>&1; then
-            echo '::error::Release v1.4.4 already exists; refusing to overwrite it.'
+          if gh release view v1.4.5 >/dev/null 2>&1; then
+            echo '::error::Release v1.4.5 already exists; refusing to overwrite it.'
             exit 1
           fi
-          APK_SHA=$(sha256sum "$ASSET_DIR/xhs-upwon-1.4.4-release.apk" | cut -d ' ' -f1)
+          APK_SHA=$(sha256sum "$ASSET_DIR/xhs-upwon-1.4.5-release.apk" | cut -d ' ' -f1)
           cat > /tmp/xhs-release-notes.md <<'NOTES'
-          ## 红薯下载器 1.4.4
+          ## 红薯下载器 1.4.5
 
           - 应用名称改为“红薯下载器”，并加入原创 3D 红薯下载吉祥物图标。
-          - 修复下载详情页点击图片后预览闪退；支持全屏查看及左右切换。
-          - 模拟器点击打开、预览保持显示、双向翻页测试通过。
+          - 修复首页下载记录缩略图无法查看；首页与详情页均使用应用内全屏预览、左右切换。
+          - 支持双指缩放、放大后拖动、双击放大或复原。
+          - 合并式及同记录内配套视频的分离式实况照片支持长按静音播放，松开恢复照片。
+          - 仅保存静态照片的旧记录需要重新下载动态视频。
+          - 模拟器回归 3 项通过：详情页点击与翻页、首页缩略图点击与翻页、合并及分离实况视频提取配对。
+          - 回归报告：https://github.com/upwon/XHS_Downloader_Android/actions/runs/40215957710
+          - 双指缩放及长按播放在具体设备上的手势与渲染仍需真机确认。
           - 包名保持 `com.upwon.xhsdn`，与上一版相同签名证书，可直接升级。
 
-          **下载 `xhs-upwon-1.4.4-release.apk` 安装。**
+          **下载 `xhs-upwon-1.4.5-release.apk` 安装。**
           如果当前安装的是此前的 debug 测试 APK，需要先卸载；正式版使用 AniCh 现有 release 证书签名。
 
-          源代码：`0e8669a91c0d11df57ab68293ab6819d27df40da`
-          签名构建：https://github.com/upwon/AniCh/actions/runs/40064744482
-          APK SHA-256：`b86a0ab8160c137a1ddccad32f3672a661a01efd50ef5a46836d6968e3d6bba4`
+          源代码：`55ea586cb2186202458b17c0bd2b5159e8f95602`
+          签名构建：https://github.com/upwon/AniCh/actions/runs/40214971986
+          APK SHA-256：`3dac560119c18cb52a7014109d0e5c413f0f62474c9f1d6ca031b7165bdae239`
           NOTES
-          gh release create v1.4.4 \
-            "$ASSET_DIR/xhs-upwon-1.4.4-release.apk" \
+          gh release create v1.4.5 \
+            "$ASSET_DIR/xhs-upwon-1.4.5-release.apk" \
             "$ASSET_DIR/SHA256SUMS.txt" \
             "$ASSET_DIR/signing-certificate.txt" \
             "$ASSET_DIR/SOURCE_COMMIT.txt" \
-            --target 0e8669a91c0d11df57ab68293ab6819d27df40da \
-            --title '红薯下载器 1.4.4' \
+            --target 55ea586cb2186202458b17c0bd2b5159e8f95602 \
+            --title '红薯下载器 1.4.5' \
             --notes-file /tmp/xhs-release-notes.md \
             --prerelease
