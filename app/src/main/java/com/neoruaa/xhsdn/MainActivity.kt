@@ -1150,6 +1150,24 @@ private fun HistoryPage(
     topContentPadding: androidx.compose.ui.unit.Dp,
     nestedScrollConnection: androidx.compose.ui.input.nestedscroll.NestedScrollConnection? = null
 ) {
+    // Keep preview state outside lazy items so scrolling cannot dispose the window.
+    var homePreview by remember { mutableStateOf<Pair<List<MediaItem>, String>?>(null) }
+    homePreview?.let { (images, initialPath) ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { homePreview = null },
+            properties = androidx.compose.ui.window.DialogProperties(
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            com.neoruaa.xhsdn.ui.StoredImageViewer(
+                images = images,
+                initialPath = initialPath,
+                onDismiss = { homePreview = null }
+            )
+        }
+    }
     val tasks = historyUiState.allTasks
     val filteredTasks = historyUiState.filteredTasks
     val firstFilteredTask = filteredTasks.firstOrNull()
@@ -1362,7 +1380,16 @@ private fun HistoryPage(
                                     onStop = { onStopTask(task) },
                                     onCancel = { onCancelTask(task) },
                                     onDelete = { taskToDelete = task },
-                                    onMediaClick = onMediaClick,
+                                    onMediaClick = { item ->
+                                        if (item.type == MediaType.IMAGE) {
+                                            val images = (task.mediaRefs.map(::MediaItem) + uiState.mediaItems.filter {
+                                                task.status == TaskStatus.DOWNLOADING
+                                            } + item).filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
+                                            homePreview = images to item.path
+                                        } else {
+                                            onMediaClick(item)
+                                        }
+                                    },
                                     onClick = {
                                         onOpenDetail(task)
                                     },
