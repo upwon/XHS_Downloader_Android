@@ -72,6 +72,11 @@ class StoredImageViewerTest {
                 createdAt = taskId, mediaRefs = files.map { com.neoruaa.xhsdn.data.storage.StoredMediaRef.fromLegacyFile(it, "image/png") }
             ))
         }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            automation.executeShellCommand("pm grant ${app.packageName} android.permission.POST_NOTIFICATIONS").use {
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
+            }
+        }
         val scenario = ActivityScenario.launch(com.neoruaa.xhsdn.MainActivity::class.java)
         try {
             clickDescription(files[1].name)
