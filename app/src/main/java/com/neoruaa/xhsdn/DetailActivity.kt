@@ -503,6 +503,7 @@ private fun DetailScreen(
                     com.neoruaa.xhsdn.ui.StoredImageViewer(
                         modifier = Modifier.fillMaxSize(),
                         images = images,
+                        companions = uiState.mediaItems + uiState.downloadCards.mapNotNull { it.stored },
                         initialPath = path,
                         onDismiss = { previewPath = null }
                     )
