@@ -1,5 +1,6 @@
 package com.neoruaa.xhsdn.ui
 
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.neoruaa.xhsdn.R
 import com.neoruaa.xhsdn.utils.decodeSampledBitmap
 import com.neoruaa.xhsdn.viewmodels.MediaItem
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -77,6 +79,18 @@ private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem) {
             ImageLoad(context.decodeSampledBitmap(item.media, 2048, 2048)?.asImageBitmap(), true)
         }
     }
+    var motionFile by remember(item.path) { mutableStateOf<java.io.File?>(null) }
+    var playing by remember(item.path) { mutableStateOf(false) }
+    var videoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
+    DisposableEffect(item.path) {
+        onDispose {
+            videoView?.stopPlayback()
+            motionFile?.delete()
+        }
+    }
+    LaunchedEffect(item.path) {
+        motionFile = withContext(Dispatchers.IO) { extractMotionVideo(context, item) }
+    }
     var scale by remember(item.path) { mutableFloatStateOf(1f) }
     var offset by remember(item.path) { mutableStateOf(Offset.Zero) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -95,13 +109,34 @@ private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem) {
     Box(modifier.clipToBounds().onSizeChanged { viewport = it }
         .transformable(state = transform, canPan = { scale > 1f })
         .pointerInput(item.path) {
-            detectTapGestures(onDoubleTap = {
+            detectTapGestures(onPress = {
+                try {
+                    withTimeoutOrNull(android.view.ViewConfiguration.getLongPressTimeout().toLong()) { tryAwaitRelease() }
+                        ?: run { playing = motionFile != null; tryAwaitRelease() }
+                } finally { playing = false }
+            }, onDoubleTap = {
                 scale = if (scale > 1f) 1f else 2.5f
                 offset = Offset.Zero
             })
         }, contentAlignment = Alignment.Center) {
         val bitmap = image.bitmap
-        if (bitmap != null) {
+        if (playing && motionFile != null) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { viewContext ->
+                    android.widget.VideoView(viewContext).also { view ->
+                        videoView = view
+                        view.setOnPreparedListener { player ->
+                            player.isLooping = true
+                            player.setVolume(0f, 0f)
+                            view.start()
+                        }
+                        view.setVideoPath(motionFile!!.absolutePath)
+                    }
+                },
+                onRelease = { it.stopPlayback(); videoView = null }
+            )
+        } else if (bitmap != null) {
             Image(bitmap, contentDescription = item.media.displayName,
                 contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().graphicsLayer {
                     scaleX = scale
