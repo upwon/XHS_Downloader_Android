@@ -88,6 +88,34 @@ class StoredImageViewerTest {
         }
     }
 
+    @Test fun mergedAndSeparateLivePhotosContainPlayableVideo() = kotlinx.coroutines.runBlocking {
+        val directory = File(app.cacheDir, "motion-test").apply { mkdirs() }
+        try {
+            val still = File(directory, "photo.jpg")
+            val bitmap = Bitmap.createBitmap(80, 120, Bitmap.Config.ARGB_8888)
+            still.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+            bitmap.recycle()
+            val video = File(directory, "photo_motion.mp4")
+            instrumentation.context.assets.open("motion-test.mp4").use { input ->
+                video.outputStream().use { input.copyTo(it) }
+            }
+            val merged = File(directory, "merged.jpg")
+            merged.outputStream().use { output ->
+                still.inputStream().use { it.copyTo(output) }
+                video.inputStream().use { it.copyTo(output) }
+            }
+            val extracted = com.neoruaa.xhsdn.ui.extractMotionVideo(app,
+                com.neoruaa.xhsdn.viewmodels.MediaItem(merged.path, com.neoruaa.xhsdn.viewmodels.MediaType.IMAGE))
+            assertTrue("Merged motion extraction failed", extracted != null && extracted.length() == video.length())
+            extracted?.delete()
+            val paired = com.neoruaa.xhsdn.ui.extractMotionVideo(app,
+                com.neoruaa.xhsdn.viewmodels.MediaItem(still.path, com.neoruaa.xhsdn.viewmodels.MediaType.IMAGE),
+                listOf(com.neoruaa.xhsdn.viewmodels.MediaItem(video.path, com.neoruaa.xhsdn.viewmodels.MediaType.VIDEO)))
+            assertTrue("Separate motion pairing failed", paired != null && paired.length() == video.length())
+            paired?.delete()
+        } finally { directory.deleteRecursively() }
+    }
+
     private fun clickDescription(description: String) {
         val deadline = SystemClock.uptimeMillis() + 8000
         while (SystemClock.uptimeMillis() < deadline) {
