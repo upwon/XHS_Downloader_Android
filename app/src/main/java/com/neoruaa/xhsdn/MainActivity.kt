@@ -1382,9 +1382,9 @@ private fun HistoryPage(
                                     onDelete = { taskToDelete = task },
                                     onMediaClick = { item ->
                                         if (item.type == MediaType.IMAGE) {
-                                            val images = (task.mediaRefs.map(::MediaItem) + uiState.mediaItems.filter {
-                                                task.status == TaskStatus.DOWNLOADING
-                                            } + item).filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
+                                            val images = ((if (task.mediaRefs.isNotEmpty()) task.mediaRefs.map(::MediaItem)
+                                                else if (task.status == TaskStatus.DOWNLOADING) uiState.mediaItems
+                                                else emptyList()) + item).filter { it.type == MediaType.IMAGE }.distinctBy { it.path }
                                             homePreview = images to item.path
                                         } else {
                                             onMediaClick(item)
