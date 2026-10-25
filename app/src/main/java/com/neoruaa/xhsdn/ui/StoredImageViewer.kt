@@ -1,6 +1,15 @@
 package com.neoruaa.xhsdn.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -68,11 +77,38 @@ private fun StoredImagePage(modifier: Modifier = Modifier, item: MediaItem) {
             ImageLoad(context.decodeSampledBitmap(item.media, 2048, 2048)?.asImageBitmap(), true)
         }
     }
-    Box(modifier, contentAlignment = Alignment.Center) {
+    var scale by remember(item.path) { mutableFloatStateOf(1f) }
+    var offset by remember(item.path) { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    val transform = rememberTransformableState { zoom, pan, _ ->
+        scale = (scale * zoom).coerceIn(1f, 5f)
+        val bitmap = image.bitmap
+        val fit = if (bitmap != null) minOf(
+            viewport.width.toFloat() / bitmap.width,
+            viewport.height.toFloat() / bitmap.height
+        ) else 0f
+        val maxX = ((bitmap?.width ?: 0) * fit * scale - viewport.width).coerceAtLeast(0f) / 2
+        val maxY = ((bitmap?.height ?: 0) * fit * scale - viewport.height).coerceAtLeast(0f) / 2
+        offset = Offset((offset.x + pan.x).coerceIn(-maxX, maxX),
+            (offset.y + pan.y).coerceIn(-maxY, maxY))
+    }
+    Box(modifier.clipToBounds().onSizeChanged { viewport = it }
+        .transformable(state = transform, canPan = { scale > 1f })
+        .pointerInput(item.path) {
+            detectTapGestures(onDoubleTap = {
+                scale = if (scale > 1f) 1f else 2.5f
+                offset = Offset.Zero
+            })
+        }, contentAlignment = Alignment.Center) {
         val bitmap = image.bitmap
         if (bitmap != null) {
             Image(bitmap, contentDescription = item.media.displayName,
-                contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                })
         } else {
             Text(stringResource(if (image.complete) R.string.detail_image_unavailable else R.string.detail_image_loading),
                 modifier = Modifier.padding(24.dp))
