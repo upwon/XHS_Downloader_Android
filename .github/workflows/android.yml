@@ -1,0 +1,80 @@
+name: Android APK
+on:
+  push:
+    branches: [main, 'codex/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Generate live photo video fixture
+        run: |
+          mkdir -p app/src/androidTest/assets
+          printf '%s' 'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAyVtZGF0AAACrQYF//+p3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NCByMzEwOCAzMWUxOWY5IC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAyMyAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTQgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAyZYiEABL//ujJ/MsrL+PUN7NGKbNJpxzCPR0w6eApOszbImTY1X7rkidIOUqyBwCZdoEAAAALQZokbEP//qmWBBwAAAAJQZ5CeIIfAEHBAAAACQGeYXRD/wCKgAAAAAkBnmNqQ/8AioEAAAN3bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAqF0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAFAAAAB4AAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAQAAABAAAAAAIZbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAKABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABxG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAYRzdGJsAAAAwHN0c2QAAAAAAAAAAQAAALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAFAAeABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAK/+EAGWdkAAqs2UUR+XARAAADAAEAAAMACg8SJZYBAAZo6+PLIsD9+PgAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAGOgAABjoAAAAGHN0dHMAAAAAAAAAAQAAAAUAAAgAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAA4Y3R0cwAAAAAAAAAFAAAAAQAAEAAAAAABAAAoAAAAAAEAABAAAAAAAQAAAAAAAAABAAAIAAAAABxzdHNjAAAAAAAAAAEAAAABAAAABQAAAAEAAAAoc3RzegAAAAAAAAAAAAAABQAAAucAAAAPAAAADQAAAA0AAAANAAAAFHN0Y28AAAAAAAAAAQAAADAAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYwLjE2LjEwMA==' | base64 --decode > app/src/androidTest/assets/motion-test.mp4
+      - name: Enable KVM for the runner
+        run: |
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Exercise downloaded image preview on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          disable-linux-hw-accel: false
+          api-level: 34
+          arch: x86_64
+          profile: pixel_7_pro
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.neoruaa.xhsdn.feature.detail.StoredImageViewerTest --no-daemon
+      - name: Preserve image preview test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-preview-test-results-${{ github.run_id }}
+          path: |
+            app/build/reports/androidTests/connected/debug
+            app/build/outputs/androidTest-results/connected/debug
+          if-no-files-found: ignore
+      - name: Configure signing
+        id: signing
+        env:
+          SIGNING_KEY: ${{ secrets.BASE_64_SIGNING_KEY }}
+          SIGNING_PROPERTIES: ${{ secrets.LOCAL_PROPERTIES }}
+        shell: bash
+        run: |
+          if [[ -n "$SIGNING_KEY" && -n "$SIGNING_PROPERTIES" ]]; then
+            umask 077
+            printf '%s' "$SIGNING_KEY" | base64 --decode > app/release_keystore.jks
+            printf '%s\n' "$SIGNING_PROPERTIES" > keystore.properties
+            printf '\nstoreFile=app/release_keystore.jks\n' >> keystore.properties
+            echo 'task=assembleRelease' >> "$GITHUB_OUTPUT"
+            echo 'variant=release' >> "$GITHUB_OUTPUT"
+          else
+            echo '::notice::Signing secrets unavailable; building a debug-signed test APK.'
+            echo 'task=assembleDebug' >> "$GITHUB_OUTPUT"
+            echo 'variant=debug' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate and build
+        env:
+          BUILD_TASK: ${{ steps.signing.outputs.task }}
+        run: bash ./gradlew :app:testDebugUnitTest :app:lintDebug ":app:$BUILD_TASK" --no-daemon
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-upwon-${{ steps.signing.outputs.variant }}-${{ github.sha }}
+          path: app/build/outputs/apk/${{ steps.signing.outputs.variant }}/*.apk
+          if-no-files-found: error
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/release_keystore.jks keystore.properties
