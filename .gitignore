@@ -29,6 +29,7 @@ render.experimental.xml
 # Keystore files
 *.jks
 *.keystore
+keystore.properties
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
@@ -38,3 +39,4 @@ google-services.json
 
 python/
 *.bak
+/xhs_workspace
