@@ -31,13 +31,13 @@
     <string name="available_tokens_label">可用字段</string>
     <string name="custom_format_drag_hint">长按字段可拖拽到上方，点击则在光标位置插入。</string>
     <string name="token_username">用户名</string>
-    <string name="token_user_id">小红书号</string>
+    <string name="token_user_id">内部用户 UID</string>
     <string name="token_title">标题</string>
     <string name="token_post_id">笔记ID</string>
     <string name="token_publish_time">发布时间</string>
     <string name="token_index">第几张（自然数）</string>
     <string name="token_index_padded">第几张（两位数）</string>
-    <string name="token_download_timestamp">开始下载时的时间戳</string>
+    <string name="token_download_timestamp">下载时间</string>
     <string name="webview_title">通过网页爬取</string>
     <string name="webview_enter_url">网页链接</string>
     <string name="webview_go">前往</string>
@@ -92,6 +92,7 @@
     <!-- Download option strings -->
     <string name="create_live_photos_desc">关闭后 Live Photo 将作为图片+视频分别下载</string>
     <string name="selective_download">选择性下载</string>
+    <string name="selective_download_title">选择性下载 %1$d/%2$d</string>
     <string name="selective_download_desc">先预览缩略图，再下载选中的媒体</string>
     <string name="selective_download_caching">正在缓存媒体...</string>
     <string name="selective_download_ready">已选择 %1$d/%2$d</string>
@@ -114,7 +115,7 @@
     <string name="enable_custom_naming_desc">使用模板命名文件</string>
     <string name="naming_template">命名模板</string>
     <string name="reset_template">重置模板</string>
-    <string name="insert_placeholder_hint">点击下方占位符可插入到光标处</string>
+    <string name="insert_placeholder_hint">点击字段插入，时间字段可选择格式。</string>
 
     <!-- About section strings -->
     <string name="version">版本号</string>
@@ -290,6 +291,8 @@
     <string name="download_refresh">刷新笔记</string>
     <string name="download_select_all">全选 / 全不选</string>
     <string name="history_load_more">加载更多</string>
+    <string name="common_download">下载</string>
+    <string name="common_save_info">保存信息</string>
     <string name="common_copy_link">复制链接</string>
     <string name="settings_media_title">媒体与格式</string>
     <string name="settings_archive_title">归档与记录</string>
@@ -368,7 +371,7 @@
     <string name="update_error_version">版本号格式无法识别，无法判断是否有更新。</string>
     <string name="update_notes_empty">此版本未提供更新说明。</string>
     <string name="update_later">稍后</string>
-    <string name="update_open_release">前往下载</string>
+    <string name="update_open_release">下载</string>
     <string name="update_open_failed">无法打开版本下载页面。</string>
     <string name="update_close">关闭</string>
     <string name="selective_dimensions">%1$d × %2$d</string>
@@ -416,4 +419,17 @@
     <string name="detail_image_position">%1$d / %2$d</string>
     <string name="detail_image_loading">正在加载图片…</string>
     <string name="detail_image_unavailable">无法读取图片，文件可能已移动、删除或访问权限已失效。</string>
+    <string name="token_red_id">小红书号</string>
+    <string name="download_author_id_unavailable">未能获取作者的小红书号，文件名中已省略该字段。</string>
+    <string name="settings_naming_invalid_template">尚未保存。请检查字段名称和成对的大括号，例如 {redId}_{publishTime:MM-dd}。</string>
+    <string name="settings_naming_invalid_time_format">尚未保存。请使用有效的时间格式，例如 {publishTime:MM-dd} 或 {downloadTimestamp:yyyy-MM-dd}。</string>
+    <string name="settings_naming_time_pattern">时间格式</string>
+    <string name="settings_naming_time_default">默认</string>
+    <string name="settings_naming_time_date">年月日</string>
+    <string name="settings_naming_time_month_day">月日</string>
+    <string name="settings_naming_time_full">完整时间</string>
+    <string name="settings_naming_time_hint">yyyy：年 · MM：月 · dd：日 · HH：时 · mm：分 · ss：秒</string>
+    <string name="settings_naming_time_invalid">请使用 MM-dd 或 yyyy-MM-dd_HH-mm-ss 等时间格式。</string>
+    <string name="settings_naming_time_preview">预览：%1$s</string>
+    <string name="common_insert">插入</string>
 </resources>

@@ -1,13 +1,12 @@
 package com.neoruaa.xhsdn.domain.download
 
+import com.neoruaa.xhsdn.NamingFormat
 import com.neoruaa.xhsdn.core.model.ResolvedMedia
 import com.neoruaa.xhsdn.core.model.ResolvedNote
 import com.neoruaa.xhsdn.data.settings.*
 import java.net.URI
 import kotlinx.serialization.encodeToString
 import com.neoruaa.xhsdn.data.network.ResumableTransfer
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /** Shared naming and candidate policy for normal, selective and WebView downloads. */
@@ -33,12 +32,15 @@ object NoteOutput {
 
     fun imageUrls(image: ResolvedMedia.Image, format: ImageFormat): List<String> {
         val raw = image.originalUrl
+        val fileId = image.fileId?.trim()?.takeIf(String::isNotEmpty)
         val uri = runCatching { URI(raw) }.getOrNull()
         val parts = uri?.path.orEmpty().trimStart('/').split('/')
-        val token = (if (parts.size > 2 && parts[1].matches(Regex("[a-fA-F0-9]{32}"))) parts.drop(2) else parts)
+        val token = fileId ?: (if (parts.size > 2 && parts[1].matches(Regex("[a-fA-F0-9]{32}"))) parts.drop(2) else parts)
             .joinToString("/").substringBefore('!')
-        val knownCdn = uri?.host?.let { it.endsWith(".xhscdn.com") || it.endsWith(".xiaohongshu.com") } == true
-        if (!knownCdn || token.isBlank()) return listOf(image.sourceUrl, raw).distinct()
+        val knownCdn = uri?.host?.lowercase(Locale.ROOT)?.let {
+            it.endsWith(".xhscdn.com") || it.endsWith(".xiaohongshu.com") || it.endsWith(".rednotecdn.com")
+        } == true
+        if ((fileId == null && !knownCdn) || token.isBlank()) return listOf(image.sourceUrl, raw).distinct()
         val preferred = if (format == ImageFormat.AUTO) "https://sns-img-bd.xhscdn.com/$token"
             else "https://ci.xiaohongshu.com/$token?imageView2/format/${format.name.lowercase(Locale.ROOT)}"
         return listOf(preferred, image.sourceUrl, raw).distinct()
@@ -67,25 +69,31 @@ object NoteOutput {
     }
 
     fun fileName(note: ResolvedNote, settings: AppSettings, index: Int, extension: String, createdAt: Long): String {
-        val date = note.publishedAt?.let { SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.ROOT).format(Date(it)) }
+        val date = note.publishedAt?.let { NamingFormat.formatTimestamp(it, NamingFormat.DEFAULT_DATE_PATTERN) }
             ?: note.publishTime.orEmpty()
         val values = mapOf("username" to note.authorName.orEmpty(), "userId" to note.authorId.orEmpty(),
+            "redId" to note.authorRedId.orEmpty(),
             "title" to note.title.orEmpty(), "postId" to note.noteId, "publishTime" to date,
             "index" to (index + 1).toString(), "index_padded" to (index + 1).toString().padStart(2, '0'),
             "downloadTimestamp" to createdAt.toString())
         val template = if (settings.useCustomNamingFormat) settings.customNamingTemplate else "{postId}"
-        val base = Regex("\\{([a-zA-Z_]+)\\}").replace(template) { values[it.groupValues[1]].orEmpty() }
+        val base = NamingFormat.render(template, values, note.publishedAt ?: note.publishTime?.toLongOrNull(), createdAt)
         return safePart(base, note.noteId.ifBlank { "note" }) + "_${(index + 1).toString().padStart(2, '0')}.$extension"
     }
 
-    fun recordKey(noteId: String, mediaId: String, settings: AppSettings, folders: List<String>): String {
+    fun recordKey(noteId: String, mediaId: String, settings: AppSettings, folders: List<String>, authorRedId: String? = null): String {
         val options = settings.downloadOptions
+        val publicId = authorRedId?.takeIf(String::isNotBlank)
+        val authorIdentity = if (settings.useCustomNamingFormat &&
+            NamingFormat.containsToken(settings.customNamingTemplate, NamingFormat.TOKEN_RED_ID)) {
+            listOf("authorRedId", if (publicId == null) "missing" else "present", publicId.orEmpty())
+        } else emptyList()
         val identity = listOf(noteId, mediaId, settings.customStorageTreeUri.orEmpty(),
             if (settings.useCustomNamingFormat) settings.customNamingTemplate else "{postId}",
             options.imageFormat.name, options.videoPreference.name, options.livePhotoMode.name,
             options.livePhotoFormat.name,
             options.imageDownload.toString(), options.videoDownload.toString(), options.videoCoverDownload.toString(),
-            options.writePublishTime.toString()) + folders
+            options.writePublishTime.toString()) + folders + authorIdentity
         return ResumableTransfer.fingerprint(DownloadJson.encodeToString(identity))
     }
 

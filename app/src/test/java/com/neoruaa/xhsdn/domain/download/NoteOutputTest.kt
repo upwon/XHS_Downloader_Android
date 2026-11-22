@@ -5,10 +5,83 @@ import com.neoruaa.xhsdn.core.model.MediaCandidate
 import com.neoruaa.xhsdn.data.settings.VideoPreference
 import com.neoruaa.xhsdn.data.settings.ImageFormat
 import com.neoruaa.xhsdn.data.settings.AppSettings
+import com.neoruaa.xhsdn.NamingFormat
+import com.neoruaa.xhsdn.core.model.ResolvedNote
+import java.util.TimeZone
 import org.junit.Assert.*
 import org.junit.Test
 
 class NoteOutputTest {
+    @Test fun publicAccountNumberAndInternalUidAreIndependentNamingFields() {
+        val note = ResolvedNote("", null, null, "Author", "internal-uid", null,
+            noteId = "note", authorRedId = "public-number")
+        val settings = AppSettings(useCustomNamingFormat = true, customNamingTemplate = "{redId}_{userId}")
+        assertEquals("public-number_internal-uid_01.jpg", NoteOutput.fileName(note, settings, 0, "jpg", 1))
+        assertEquals("_internal-uid_01.jpg", NoteOutput.fileName(note.copy(authorRedId = null), settings, 0, "jpg", 1))
+        assertTrue(NamingFormat.containsToken(settings.customNamingTemplate, NamingFormat.TOKEN_RED_ID))
+        assertFalse(NamingFormat.containsToken("{userId}", NamingFormat.TOKEN_RED_ID))
+    }
+
+    @Test fun publicIdNamingRefreshesDownloadIdentityWhenTheLookupRecoversOrTheIdChanges() {
+        val settings = AppSettings(useCustomNamingFormat = true, customNamingTemplate = "{redId}_{title}")
+        val missing = NoteOutput.recordKey("note", "image", settings, emptyList())
+        val resolved = NoteOutput.recordKey("note", "image", settings, emptyList(), "public-id")
+        assertNotEquals(missing, resolved)
+        assertNotEquals(resolved, NoteOutput.recordKey("note", "image", settings, emptyList(), "changed-id"))
+        assertEquals(missing, NoteOutput.recordKey("note", "image", settings, emptyList(), ""))
+        for (unused in listOf(settings.copy(useCustomNamingFormat = false),
+            settings.copy(customNamingTemplate = "{userId}_{title}"))) {
+            assertEquals(NoteOutput.recordKey("note", "image", unused, emptyList()),
+                NoteOutput.recordKey("note", "image", unused, emptyList(), "public-id"))
+        }
+    }
+
+    @Test fun customTimeFormatsUseEachTimestampAndTheDeviceTimeZone() = withTimeZone("GMT+08:00") {
+        val note = ResolvedNote("", null, null, null, null, null, noteId = "note", publishedAt = 1704164645000)
+        val settings = AppSettings(useCustomNamingFormat = true,
+            customNamingTemplate = "{publishTime:MM-dd_HH-mm}_{downloadTimestamp:yyyy-MM-dd_HH-mm}")
+        assertEquals("01-02_11-04_2024-01-03_11-04_01.jpg", NoteOutput.fileName(note, settings, 0, "jpg", 1704251045000))
+    }
+
+    @Test fun unformattedTimeTokensKeepTheirExistingOutput() = withTimeZone("UTC") {
+        val note = ResolvedNote("", null, null, null, null, null, noteId = "note", publishedAt = 1704164645000)
+        val settings = AppSettings(useCustomNamingFormat = true, customNamingTemplate = "{publishTime}_{downloadTimestamp}")
+        assertEquals("2024-01-02_03-04-05_1704251045000_01.jpg", NoteOutput.fileName(note, settings, 0, "jpg", 1704251045000))
+        assertEquals("1704164645000_1704251045000_01.jpg",
+            NoteOutput.fileName(note.copy(publishedAt = null, publishTime = "1704164645000"), settings, 0, "jpg", 1704251045000))
+    }
+
+    @Test fun formattedLegacyTimestampAndQuotedLiteralsRemainSafeForFilenames() = withTimeZone("UTC") {
+        val note = ResolvedNote("", null, null, null, null, "1704164645000", noteId = "note")
+        val settings = AppSettings(useCustomNamingFormat = true, customNamingTemplate = "{publishTime:MM/dd' at 'HH:mm}")
+        assertEquals("01_02 at 03_04_01.jpg", NoteOutput.fileName(note, settings, 0, "jpg", 1))
+        assertEquals("note_01.jpg", NoteOutput.fileName(note.copy(publishTime = null), settings, 0, "jpg", 1))
+    }
+
+    @Test fun invalidTemplatesAndNonPortablePatternsDoNotInterruptDownloads() {
+        val note = ResolvedNote("", null, null, null, null, null, noteId = "note")
+        for (template in listOf("{publishTime:}", "{publishTime:QQ}", "{publishTime:yyyy-'unterminated}",
+            "{publishTime:uuuu}", "{unknown}", "{redId:MM}", "{publishTime:MM-dd", "{title}}")) {
+            assertNotNull(template, NamingFormat.validationError(template))
+            assertEquals(template, "note_01.jpg", NoteOutput.fileName(note,
+                AppSettings(useCustomNamingFormat = true, customNamingTemplate = template), 0, "jpg", 1))
+        }
+        assertNull(NamingFormat.validationError("{redId}_{publishTime:MM-dd}_{downloadTimestamp:HH-mm-ss}"))
+        assertFalse(NamingFormat.isValidDatePattern("y".repeat(81)))
+        assertFalse(NamingFormat.isValidDatePattern("yyyy\nMM"))
+        assertFalse(NamingFormat.isValidDatePattern("'literal'"))
+    }
+
+    private fun withTimeZone(zone: String, action: () -> Unit) {
+        val original = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone(zone))
+            action()
+        } finally {
+            TimeZone.setDefault(original)
+        }
+    }
+
     @Test fun knownWatermarkedStreamsNeverWinOnResolutionBitrateSizeOrCompatibility() {
         val video = ResolvedMedia.Video("watermarked", candidates = listOf(
             MediaCandidate("watermarked", width = 4000, height = 3000, bitrate = 99999, size = 99999, codec = "h264", watermarked = true),
@@ -40,9 +113,40 @@ class NoteOutputTest {
     }
 
     @Test fun stripsTemporaryCdnRoutingPrefixBeforeRequestingOriginalImage() {
-        val image = ResolvedMedia.Image("https://sns-webpic-qc.xhscdn.com/202609222015/0123456789abcdef0123456789abcdef/notes_pre_post/token!nd_dft_wlteh_webp_3")
-        assertEquals("https://sns-img-bd.xhscdn.com/notes_pre_post/token", NoteOutput.imageUrls(image, ImageFormat.AUTO).first())
-        assertEquals("https://ci.xiaohongshu.com/notes_pre_post/token?imageView2/format/avif", NoteOutput.imageUrls(image, ImageFormat.AVIF).first())
+        for (token in listOf("notes_pre_post/token", "c/notes_pre_post/token")) {
+            val image = ResolvedMedia.Image("https://sns-webpic-qc.xhscdn.com/202609222015/0123456789abcdef0123456789abcdef/$token!nd_dft_wlteh_webp_3")
+            assertEquals("https://sns-img-bd.xhscdn.com/$token", NoteOutput.imageUrls(image, ImageFormat.AUTO).first())
+            assertEquals("https://ci.xiaohongshu.com/$token?imageView2/format/avif", NoteOutput.imageUrls(image, ImageFormat.AVIF).first())
+        }
+    }
+
+    @Test fun prefersFileIdForOverseasImagesAndRetainsTheirWebFallbacks() {
+        val preview = "https://sns-web-i10.rednotecdn.com/oss-sg/notes_pre_post/preview!h5_1080jpg"
+        for (fileId in listOf("notes_pre_post/original", "c/notes_pre_post/original")) {
+            val image = ResolvedMedia.Image(preview, fileId = fileId)
+            assertEquals(listOf("https://sns-img-bd.xhscdn.com/$fileId", preview),
+                NoteOutput.imageUrls(image, ImageFormat.AUTO))
+            assertEquals(listOf("https://ci.xiaohongshu.com/$fileId?imageView2/format/jpeg", preview),
+                NoteOutput.imageUrls(image, ImageFormat.JPEG))
+        }
+        val domestic = "https://sns-img-qc.xhscdn.com/notes_pre_post/token!h5_1080jpg"
+        assertEquals("https://sns-img-bd.xhscdn.com/notes_pre_post/token",
+            NoteOutput.imageUrls(ResolvedMedia.Image(domestic, fileId = " "), ImageFormat.AUTO).first())
+    }
+
+    @Test fun legacyOverseasSnapshotsRestoreOriginalCandidatesFromTheirSignedWebUrls() {
+        val preview = "http://sns-web-i10.rednotecdn.com/202611151054/20ac2aa8306a6336a7178b60311bd34f/notes_pre_post/token!rnh5jpg"
+        val image = com.neoruaa.xhsdn.data.settings.DownloadJson.decodeFromString<ResolvedMedia.Image>(
+            """{"sourceUrl":"$preview"}""")
+        assertNull(image.fileId)
+        assertEquals(listOf("https://sns-img-bd.xhscdn.com/notes_pre_post/token", preview),
+            NoteOutput.imageUrls(image, ImageFormat.AUTO))
+        assertEquals("https://ci.xiaohongshu.com/notes_pre_post/token?imageView2/format/jpeg",
+            NoteOutput.imageUrls(image, ImageFormat.JPEG).first())
+        for (host in listOf("sns-web-i10.rednotecdn.com.evil", "evilrednotecdn.com")) {
+            val unrelated = "https://$host/notes_pre_post/token!rnh5jpg"
+            assertEquals(listOf(unrelated), NoteOutput.imageUrls(ResolvedMedia.Image(unrelated), ImageFormat.AUTO))
+        }
     }
 
     @Test fun skipToggleAndNetworkSettingsDoNotChangeResourceIdentity() {
